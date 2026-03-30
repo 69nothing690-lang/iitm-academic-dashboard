@@ -1,12 +1,10 @@
-import type React from "react";
-
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      "spline-viewer": React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & { url?: string; loading?: string },
-        HTMLElement
-      >;
-    }
+declare module "@splinetool/react-spline" {
+  import type { CSSProperties } from "react";
+  interface SplineProps {
+    scene: string;
+    onLoad?: (spline: unknown) => void;
+    style?: CSSProperties;
+    className?: string;
   }
+  export default function Spline(props: SplineProps): JSX.Element;
 }

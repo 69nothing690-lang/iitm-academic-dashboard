@@ -383,9 +383,12 @@ export function TodayDashboard({
             </div>
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                display: "flex",
+                flexDirection: "row",
                 gap: 12,
+                overflowX: "auto",
+                paddingBottom: 8,
+                WebkitOverflowScrolling: "touch",
               }}
             >
               {alertCourses.map((c) => {
@@ -398,6 +401,8 @@ export function TodayDashboard({
                       background: "rgba(255,122,89,0.06)",
                       borderRadius: 10,
                       border: "1px solid rgba(255,122,89,0.18)",
+                      minWidth: 180,
+                      flexShrink: 0,
                     }}
                   >
                     <div

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { RobotCursor } from "../components/RobotCursor";
 
 const SplineViewer = lazy(() => import("@splinetool/react-spline"));
 
@@ -30,7 +31,7 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
   const orb2Ref = useRef<HTMLDivElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
-  // Canvas particle fallback animation
+  // Canvas particle fallback — shown until Spline loads
   useEffect(() => {
     const el = canvasContainerRef.current;
     if (!el) return;
@@ -144,10 +145,11 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
       {/* Dark base */}
       <div className="landing-bg" />
 
-      {/* Canvas particle fallback — always rendered underneath */}
+      {/* Canvas particle fallback — visible until Spline loads */}
       <motion.div
+        animate={{ opacity: splineLoaded ? 0 : 1 }}
+        transition={{ duration: 1.5, ease: "easeInOut" }}
         style={{
-          opacity: splineOpacity,
           position: "fixed",
           inset: 0,
           zIndex: 0,
@@ -165,14 +167,13 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
         />
       </motion.div>
 
-      {/* Spline 3D scene — lazy loaded, fades in over canvas fallback */}
+      {/* Spline 3D — full page, fades in on load */}
       <motion.div
         style={{
           opacity: splineOpacity,
           position: "fixed",
           inset: 0,
           zIndex: 1,
-          pointerEvents: "none",
           overflow: "hidden",
         }}
       >
@@ -180,13 +181,13 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: splineLoaded ? 1 : 0 }}
-            transition={{ duration: 1.2, ease: "easeInOut" }}
+            transition={{ duration: 1.4, ease: "easeInOut" }}
             style={{ width: "100%", height: "100%" }}
           >
             <SplineViewer
-              scene="https://prod.spline.design/6Wq1Q7YGyM-iab9i/scene.splinecode"
+              scene="https://prod.spline.design/atbUfD8ybgiIefp4/scene.splinecode"
               onLoad={() => setSplineLoaded(true)}
-              style={{ width: "100%", height: "100%" }}
+              style={{ width: "100%", height: "100%", display: "block" }}
             />
           </motion.div>
         </Suspense>
@@ -201,6 +202,9 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
 
       {/* Bottom fade to features */}
       <div className="landing-spline-bottom-fade" />
+
+      {/* Cursor-following robot — fixed bottom-left */}
+      <RobotCursor />
 
       {/* Navbar */}
       <motion.nav
