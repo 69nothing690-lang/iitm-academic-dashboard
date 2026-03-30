@@ -1,10 +1,20 @@
 import {
+  BarChart3,
+  BookOpen,
+  CalendarDays,
+  CheckSquare,
+  Home,
+  LayoutGrid,
+  Menu,
+  Settings2,
+} from "lucide-react";
+import {
   AnimatePresence,
   motion,
   useMotionValue,
   useTransform,
 } from "motion/react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { NotificationManager } from "./components/NotificationManager";
 import { Sidebar, type TabId } from "./components/Sidebar";
@@ -21,11 +31,45 @@ import { TasksView } from "./pages/TasksView";
 import { Timetable } from "./pages/Timetable";
 import { TodayDashboard } from "./pages/TodayDashboard";
 
+const TAB_LABELS: Record<TabId, string> = {
+  today: "Today",
+  timetable: "Timetable",
+  attendance: "Attendance",
+  calendar: "Calendar",
+  exams: "Exams",
+  tasks: "Tasks",
+  settings: "Settings",
+};
+
+const BOTTOM_NAV_ITEMS = [
+  { id: "today" as TabId, label: "Today", Icon: Home },
+  { id: "timetable" as TabId, label: "Timetable", Icon: LayoutGrid },
+  { id: "attendance" as TabId, label: "Attend", Icon: BarChart3 },
+  { id: "calendar" as TabId, label: "Calendar", Icon: CalendarDays },
+  { id: "exams" as TabId, label: "Exams", Icon: BookOpen },
+  { id: "tasks" as TabId, label: "Tasks", Icon: CheckSquare },
+  { id: "settings" as TabId, label: "Settings", Icon: Settings2 },
+];
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return isMobile;
+}
+
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
   const [showLogin, setShowLogin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("today");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const isMobile = useIsMobile();
 
   // Sync state — set after login choice
   const [userId, setUserId] = useState<string | undefined>(undefined);
@@ -53,6 +97,32 @@ export default function App() {
     [mouseX, mouseY],
   );
 
+  // Touch tracking for swipe gestures
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  }, []);
+
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      const dx = e.changedTouches[0].clientX - touchStartX.current;
+
+      // Sidebar open gesture — edge swipe takes top priority
+      if (touchStartX.current < 50 && dx > 50) {
+        setSidebarOpen(true);
+        return;
+      }
+      if (dx < -50 && sidebarOpen) {
+        setSidebarOpen(false);
+        return;
+      }
+    },
+    [sidebarOpen],
+  );
+
   const handleLogin = (uid?: string, migrate?: boolean) => {
     if (uid) {
       setUserId(uid);
@@ -62,6 +132,11 @@ export default function App() {
       setStorageMode("local");
     }
     setShowLogin(false);
+  };
+
+  const handleTabChange = (t: TabId) => {
+    setActiveTab(t);
+    if (isMobile) setSidebarOpen(false);
   };
 
   const renderContent = () => {
@@ -74,7 +149,7 @@ export default function App() {
             tasks={data.tasks}
             semSettings={data.semSettings}
             studentName={data.studentName}
-            onTabChange={(t) => setActiveTab(t as TabId)}
+            onTabChange={(t) => handleTabChange(t as TabId)}
           />
         );
       case "timetable":
@@ -196,6 +271,8 @@ export default function App() {
               />
               <motion.div
                 onMouseMove={handleMouseMove}
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
                 animate={{ backgroundColor: theme.bg }}
                 transition={{ duration: 0.6, ease: "easeInOut" }}
                 style={{
@@ -299,19 +376,216 @@ export default function App() {
                     width: "100%",
                   }}
                 >
-                  <Sidebar
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                    accentColor={theme.accent}
-                  />
+                  {/* Desktop sidebar — static, always visible */}
+                  {!isMobile && (
+                    <Sidebar
+                      activeTab={activeTab}
+                      onTabChange={handleTabChange}
+                      accentColor={theme.accent}
+                      isMobile={false}
+                    />
+                  )}
+
+                  {/* Mobile sidebar — overlay drawer */}
+                  {isMobile && (
+                    <Sidebar
+                      activeTab={activeTab}
+                      onTabChange={handleTabChange}
+                      accentColor={theme.accent}
+                      isMobile={true}
+                      isOpen={sidebarOpen}
+                      onClose={() => setSidebarOpen(false)}
+                    />
+                  )}
+
+                  {/* Main content */}
                   <main
-                    style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}
+                    style={{
+                      flex: 1,
+                      overflowY: "auto",
+                      overflowX: "hidden",
+                      paddingTop: isMobile ? 56 : 0,
+                      paddingBottom: isMobile ? 72 : 0,
+                    }}
                   >
                     <AnimatePresence mode="wait">
-                      <div key={activeTab}>{renderContent()}</div>
+                      <motion.div
+                        key={activeTab}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.25 }}
+                        style={{ width: "100%" }}
+                      >
+                        {renderContent()}
+                      </motion.div>
                     </AnimatePresence>
                   </main>
                 </div>
+
+                {/* Mobile Top Navbar */}
+                {isMobile && (
+                  <motion.header
+                    initial={{ y: -56 }}
+                    animate={{ y: 0 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    style={{
+                      position: "fixed",
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: 56,
+                      zIndex: 100,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "0 16px",
+                      background: "rgba(10,12,24,0.92)",
+                      backdropFilter: "blur(20px)",
+                      WebkitBackdropFilter: "blur(20px)",
+                      borderBottom: "1px solid rgba(255,255,255,0.06)",
+                    }}
+                    data-ocid="nav.mobile.panel"
+                  >
+                    {/* Hamburger */}
+                    <button
+                      type="button"
+                      onClick={() => setSidebarOpen(true)}
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: 10,
+                        padding: "6px 8px",
+                        cursor: "pointer",
+                        color: "#a78bfa",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                      data-ocid="nav.sidebar.open_modal_button"
+                    >
+                      <Menu size={20} />
+                    </button>
+
+                    {/* Current page name */}
+                    <span
+                      style={{
+                        fontSize: 15,
+                        fontWeight: 600,
+                        color: "rgba(220,225,255,0.9)",
+                        letterSpacing: "-0.2px",
+                      }}
+                    >
+                      {TAB_LABELS[activeTab]}
+                    </span>
+
+                    {/* Brand */}
+                    <span
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 800,
+                        background: "linear-gradient(135deg, #a78bfa, #60a5fa)",
+                        WebkitBackgroundClip: "text",
+                        WebkitTextFillColor: "transparent",
+                        backgroundClip: "text",
+                        letterSpacing: "-0.3px",
+                      }}
+                    >
+                      InstiFlow
+                    </span>
+                  </motion.header>
+                )}
+
+                {/* Mobile Bottom Tab Bar */}
+                {isMobile && (
+                  <motion.nav
+                    initial={{ y: 80 }}
+                    animate={{ y: 0 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    style={{
+                      position: "fixed",
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      height: 72,
+                      zIndex: 100,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-around",
+                      background: "rgba(10,12,24,0.96)",
+                      backdropFilter: "blur(24px)",
+                      WebkitBackdropFilter: "blur(24px)",
+                      borderTop: "1px solid rgba(255,255,255,0.06)",
+                      paddingBottom: "env(safe-area-inset-bottom, 0px)",
+                    }}
+                    data-ocid="nav.bottom.panel"
+                  >
+                    {BOTTOM_NAV_ITEMS.map((item) => {
+                      const isActive = activeTab === item.id;
+                      const { Icon } = item;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          data-ocid={`nav.bottom.${item.id}.link`}
+                          onClick={() => handleTabChange(item.id)}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 3,
+                            flex: 1,
+                            padding: "6px 0",
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            color: isActive ? "#a78bfa" : "#4A5270",
+                            transition: "all 0.2s ease",
+                            position: "relative",
+                          }}
+                        >
+                          {isActive && (
+                            <motion.div
+                              layoutId="bottomActiveTab"
+                              style={{
+                                position: "absolute",
+                                inset: 0,
+                                borderRadius: 12,
+                                background: "rgba(99,102,241,0.12)",
+                              }}
+                              transition={{
+                                type: "spring",
+                                stiffness: 380,
+                                damping: 32,
+                              }}
+                            />
+                          )}
+                          <Icon
+                            size={isActive ? 20 : 18}
+                            style={{
+                              position: "relative",
+                              filter: isActive
+                                ? "drop-shadow(0 0 6px rgba(167,139,250,0.8))"
+                                : "none",
+                              transition: "all 0.2s ease",
+                            }}
+                          />
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: isActive ? 700 : 400,
+                              letterSpacing: "0.02em",
+                              position: "relative",
+                            }}
+                          >
+                            {item.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </motion.nav>
+                )}
               </motion.div>
             </TabThemeContext.Provider>
           </motion.div>

@@ -1,5 +1,14 @@
 import { motion, useScroll, useTransform } from "motion/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+const SplineViewer = lazy(() => import("@splinetool/react-spline"));
 
 interface LandingPageProps {
   onEnter: () => void;
@@ -12,71 +21,66 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
   const [adminUser, setAdminUser] = useState("");
   const [adminPass, setAdminPass] = useState("");
   const [adminError, setAdminError] = useState("");
+  const [splineLoaded, setSplineLoaded] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
   const { scrollY } = useScroll();
-  const canvasOpacity = useTransform(scrollY, [0, 600], [1, 0.3]);
+  const splineOpacity = useTransform(scrollY, [0, 600], [1, 0.3]);
 
   const orb1Ref = useRef<HTMLDivElement>(null);
   const orb2Ref = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
 
+  // Canvas particle fallback animation
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    let animId: number;
-    let w = window.innerWidth;
-    let h = window.innerHeight;
-    canvas.width = w;
-    canvas.height = h;
-
-    const particles = Array.from({ length: 80 }, () => ({
-      x: Math.random() * w,
-      y: Math.random() * h,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: (Math.random() - 0.5) * 0.4,
-      r: Math.random() * 1.5 + 0.5,
-      alpha: Math.random() * 0.5 + 0.1,
-    }));
+    const el = canvasContainerRef.current;
+    if (!el) return;
+    const canvas = document.createElement("canvas");
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.display = "block";
+    el.appendChild(canvas);
 
     const resize = () => {
-      w = window.innerWidth;
-      h = window.innerHeight;
-      canvas.width = w;
-      canvas.height = h;
+      canvas.width = el.offsetWidth;
+      canvas.height = el.offsetHeight;
     };
+    resize();
     window.addEventListener("resize", resize);
 
+    const ctx = canvas.getContext("2d")!;
+    const particles: {
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      r: number;
+      alpha: number;
+    }[] = [];
+    for (let i = 0; i < 80; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: (Math.random() - 0.5) * 0.4,
+        r: Math.random() * 2 + 0.5,
+        alpha: Math.random() * 0.5 + 0.1,
+      });
+    }
+
+    let animId: number;
     const draw = () => {
-      ctx.clearRect(0, 0, w, h);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       for (const p of particles) {
         p.x += p.vx;
         p.y += p.vy;
-        if (p.x < 0) p.x = w;
-        if (p.x > w) p.x = 0;
-        if (p.y < 0) p.y = h;
-        if (p.y > h) p.y = 0;
+        if (p.x < 0) p.x = canvas.width;
+        if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height;
+        if (p.y > canvas.height) p.y = 0;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(139,92,246,${p.alpha})`;
         ctx.fill();
-      }
-      for (let i = 0; i < particles.length; i++) {
-        for (let j = i + 1; j < particles.length; j++) {
-          const dx = particles[i].x - particles[j].x;
-          const dy = particles[i].y - particles[j].y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 120) {
-            ctx.beginPath();
-            ctx.strokeStyle = `rgba(99,102,241,${0.12 * (1 - dist / 120)})`;
-            ctx.lineWidth = 0.5;
-            ctx.moveTo(particles[i].x, particles[i].y);
-            ctx.lineTo(particles[j].x, particles[j].y);
-            ctx.stroke();
-          }
-        }
       }
       animId = requestAnimationFrame(draw);
     };
@@ -85,6 +89,7 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener("resize", resize);
+      if (el.contains(canvas)) el.removeChild(canvas);
     };
   }, []);
 
@@ -139,10 +144,10 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
       {/* Dark base */}
       <div className="landing-bg" />
 
-      {/* Canvas particle animation — fullscreen background */}
+      {/* Canvas particle fallback — always rendered underneath */}
       <motion.div
         style={{
-          opacity: canvasOpacity,
+          opacity: splineOpacity,
           position: "fixed",
           inset: 0,
           zIndex: 0,
@@ -150,17 +155,41 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
           overflow: "hidden",
         }}
       >
-        <canvas
-          ref={canvasRef}
+        <div
+          ref={canvasContainerRef}
           style={{
-            position: "absolute",
-            inset: 0,
             width: "100%",
             height: "100%",
-            pointerEvents: "none",
-            opacity: 0.6,
+            display: "block",
           }}
         />
+      </motion.div>
+
+      {/* Spline 3D scene — lazy loaded, fades in over canvas fallback */}
+      <motion.div
+        style={{
+          opacity: splineOpacity,
+          position: "fixed",
+          inset: 0,
+          zIndex: 1,
+          pointerEvents: "none",
+          overflow: "hidden",
+        }}
+      >
+        <Suspense fallback={null}>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: splineLoaded ? 1 : 0 }}
+            transition={{ duration: 1.2, ease: "easeInOut" }}
+            style={{ width: "100%", height: "100%" }}
+          >
+            <SplineViewer
+              scene="https://prod.spline.design/6Wq1Q7YGyM-iab9i/scene.splinecode"
+              onLoad={() => setSplineLoaded(true)}
+              style={{ width: "100%", height: "100%" }}
+            />
+          </motion.div>
+        </Suspense>
       </motion.div>
 
       <div ref={orb1Ref} className="landing-orb landing-orb-1" />

@@ -6,8 +6,9 @@ import {
   Home,
   LayoutGrid,
   Settings2,
+  X,
 } from "lucide-react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import type React from "react";
 
 export type TabId =
@@ -19,7 +20,11 @@ export type TabId =
   | "tasks"
   | "settings";
 
-const NAV_ITEMS: { id: TabId; label: string; Icon: React.ElementType }[] = [
+export const NAV_ITEMS: {
+  id: TabId;
+  label: string;
+  Icon: React.ElementType;
+}[] = [
   { id: "today", label: "Today", Icon: Home },
   { id: "timetable", label: "Timetable", Icon: LayoutGrid },
   { id: "attendance", label: "Attendance", Icon: BarChart3 },
@@ -40,25 +45,74 @@ interface Props {
   activeTab: TabId;
   onTabChange: (t: TabId) => void;
   accentColor: string;
+  /** Mobile only — controlled open state */
+  isOpen?: boolean;
+  /** Mobile only — close callback */
+  onClose?: () => void;
+  isMobile?: boolean;
 }
 
-export function Sidebar({ activeTab, onTabChange }: Props) {
-  return (
+export function Sidebar({
+  activeTab,
+  onTabChange,
+  isOpen,
+  onClose,
+  isMobile,
+}: Props) {
+  const handleNavClick = (id: TabId) => {
+    onTabChange(id);
+    if (isMobile && onClose) onClose();
+  };
+
+  const sidebarContent = (
     <aside
       className="glass-sidebar"
       style={{
         width: 230,
-        minHeight: "100vh",
+        minHeight: isMobile ? "100vh" : "100vh",
+        height: isMobile ? "100%" : undefined,
         padding: "28px 12px",
         display: "flex",
         flexDirection: "column",
         flexShrink: 0,
         position: "relative",
         zIndex: 10,
+        overflowY: "auto",
       }}
     >
+      {/* Mobile close button */}
+      {isMobile && (
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            position: "absolute",
+            top: 16,
+            right: 16,
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 8,
+            padding: 6,
+            cursor: "pointer",
+            color: "#7A8299",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          data-ocid="sidebar.close_button"
+        >
+          <X size={16} />
+        </button>
+      )}
+
       {/* Brand */}
-      <div style={{ marginBottom: 36, paddingLeft: 12 }}>
+      <div
+        style={{
+          marginBottom: 36,
+          paddingLeft: 12,
+          paddingRight: isMobile ? 40 : 0,
+        }}
+      >
         <div
           style={{
             fontSize: 22,
@@ -122,7 +176,7 @@ export function Sidebar({ activeTab, onTabChange }: Props) {
             <motion.button
               key={item.id}
               data-ocid={`nav.${item.id}.link`}
-              onClick={() => onTabChange(item.id)}
+              onClick={() => handleNavClick(item.id)}
               whileHover={
                 !isActive
                   ? {
@@ -232,4 +286,55 @@ export function Sidebar({ activeTab, onTabChange }: Props) {
       </div>
     </aside>
   );
+
+  // Mobile: render as overlay drawer
+  if (isMobile) {
+    return (
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              key="sidebar-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.25 }}
+              onClick={onClose}
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 200,
+                background: "rgba(0,0,0,0.6)",
+                backdropFilter: "blur(4px)",
+              }}
+              data-ocid="sidebar.backdrop"
+            />
+            {/* Drawer */}
+            <motion.div
+              key="sidebar-drawer"
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ type: "spring", stiffness: 320, damping: 34 }}
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                bottom: 0,
+                zIndex: 201,
+                width: 230,
+              }}
+              data-ocid="sidebar.panel"
+            >
+              {sidebarContent}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    );
+  }
+
+  // Desktop: static layout
+  return sidebarContent;
 }

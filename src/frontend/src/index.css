@@ -953,3 +953,14 @@ spline-viewer [id*="logo"] {
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(139, 92, 246, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
 }
+
+/* ─── Mobile Layout ──────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .mobile-scroll-hint {
+    display: flex !important;
+  }
+  .tt-grid-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

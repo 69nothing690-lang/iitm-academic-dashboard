@@ -38,9 +38,9 @@ export function GlassCard({
       ref={cardRef}
       className={`glass-card shimmer-card p-5 ${className}`}
       style={{
-        ...style,
         position: "relative",
         overflow: "hidden",
+        ...style,
       }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
