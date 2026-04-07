@@ -2,28 +2,8 @@ import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "../components/GlassCard";
 import type { SemSettings } from "../types";
+import { DEFAULT_NOTIF_PREFS, type NotifPrefs } from "../utils/notifPrefs";
 import { autoDetectSem } from "../utils/semester";
-
-interface NotifPrefs {
-  dailySummaryEnabled: boolean;
-  dailySummaryTime: string;
-  examRemindersEnabled: boolean;
-  taskRemindersEnabled: boolean;
-  customReminders: Array<{
-    id: string;
-    date: string;
-    time: string;
-    description: string;
-  }>;
-}
-
-const DEFAULT_PREFS: NotifPrefs = {
-  dailySummaryEnabled: true,
-  dailySummaryTime: "07:00",
-  examRemindersEnabled: true,
-  taskRemindersEnabled: true,
-  customReminders: [],
-};
 
 interface Props {
   semSettings: SemSettings;
@@ -41,12 +21,15 @@ export function SettingsView({
   const [notifPrefs, setNotifPrefs] = useState<NotifPrefs>(() => {
     try {
       const saved = localStorage.getItem("instiflow_notif_prefs");
-      return saved ? { ...DEFAULT_PREFS, ...JSON.parse(saved) } : DEFAULT_PREFS;
+      return saved
+        ? { ...DEFAULT_NOTIF_PREFS, ...JSON.parse(saved) }
+        : DEFAULT_NOTIF_PREFS;
     } catch {
-      return DEFAULT_PREFS;
+      return DEFAULT_NOTIF_PREFS;
     }
   });
   const [savedMsg, setSavedMsg] = useState(false);
+  const [testNotifMsg, setTestNotifMsg] = useState("");
   const [crDate, setCrDate] = useState("");
   const [crTime, setCrTime] = useState("08:00");
   const [crDesc, setCrDesc] = useState("");
@@ -61,6 +44,34 @@ export function SettingsView({
     if (savedTimer.current) clearTimeout(savedTimer.current);
     setSavedMsg(true);
     savedTimer.current = setTimeout(() => setSavedMsg(false), 2000);
+  };
+
+  const handleTestNotification = async () => {
+    if (typeof Notification === "undefined") {
+      setTestNotifMsg("\u274c Notifications not supported in this browser.");
+      return;
+    }
+    if (Notification.permission === "denied") {
+      setTestNotifMsg(
+        "\u274c Notification permission denied. Please enable in browser settings.",
+      );
+      return;
+    }
+    const initialPerm = Notification.permission;
+    let perm: NotificationPermission = initialPerm;
+    if (initialPerm === "default") {
+      perm = await Notification.requestPermission();
+    }
+    if (perm === "granted") {
+      new Notification("Test Notification", {
+        body: "InstiFlow is working",
+        icon: "/icons/icon-192.png",
+      });
+      setTestNotifMsg("\u2705 Test notification sent!");
+    } else {
+      setTestNotifMsg("\u274c Permission not granted.");
+    }
+    setTimeout(() => setTestNotifMsg(""), 3000);
   };
 
   const addCustomReminder = () => {
@@ -102,6 +113,61 @@ export function SettingsView({
     });
   };
 
+  const ToggleRow = ({
+    label,
+    subtitle,
+    checked,
+    onChange,
+  }: {
+    label: string;
+    subtitle?: string;
+    checked: boolean;
+    onChange: (v: boolean) => void;
+  }) => (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 14,
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, color: "#D0D6F0", fontWeight: 600 }}>
+          {label}
+        </div>
+        {subtitle && (
+          <div style={{ fontSize: 11, color: "#6B7590" }}>{subtitle}</div>
+        )}
+      </div>
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          cursor: "pointer",
+          marginLeft: 12,
+        }}
+      >
+        <input
+          data-ocid="settings.toggle"
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          style={{ accentColor: "#a78bfa", width: 16, height: 16 }}
+        />
+      </label>
+    </div>
+  );
+
+  const Divider = () => (
+    <div
+      style={{
+        borderTop: "1px solid rgba(255,255,255,0.06)",
+        margin: "4px 0 14px",
+      }}
+    />
+  );
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16, filter: "blur(8px)" }}
@@ -120,6 +186,8 @@ export function SettingsView({
       >
         Settings
       </h2>
+
+      {/* Profile */}
       <GlassCard style={{ marginBottom: 16 }}>
         <div
           style={{
@@ -153,6 +221,8 @@ export function SettingsView({
           placeholder="Your name"
         />
       </GlassCard>
+
+      {/* Semester Settings */}
       <GlassCard style={{ marginBottom: 16 }}>
         <div
           style={{
@@ -199,8 +269,8 @@ export function SettingsView({
                 })
               }
             >
-              <option value="even">Even (Jan–May)</option>
-              <option value="odd">Odd (Jul–Nov)</option>
+              <option value="even">Even (Jan\u2013May)</option>
+              <option value="odd">Odd (Jul\u2013Nov)</option>
             </select>
           </div>
           <div style={{ flex: 1 }}>
@@ -243,12 +313,12 @@ export function SettingsView({
               fontSize: 13,
             }}
           >
-            ↺ Reset to auto-detect
+            \u21ba Reset to auto-detect
           </motion.button>
         )}
       </GlassCard>
 
-      {/* ── Notifications ── */}
+      {/* Notifications */}
       <GlassCard style={{ marginBottom: 16 }}>
         <div
           style={{
@@ -267,7 +337,7 @@ export function SettingsView({
               fontWeight: 600,
             }}
           >
-            🔔 Notifications
+            \ud83d\udd14 Notifications
           </div>
           {savedMsg && (
             <span style={{ fontSize: 11, color: "#4ade80", fontWeight: 600 }}>
@@ -276,42 +346,106 @@ export function SettingsView({
           )}
         </div>
 
-        {/* Daily Summary */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 14,
-          }}
-        >
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, color: "#D0D6F0", fontWeight: 600 }}>
-              Daily Class Summary
-            </div>
-            <div style={{ fontSize: 11, color: "#6B7590" }}>
-              Morning summary of today's classes, tasks & exams
-            </div>
-          </div>
-          <label
+        {/* Test Notification Button */}
+        <div style={{ marginBottom: 16 }}>
+          <motion.button
+            data-ocid="settings.submit_button"
+            whileTap={{ scale: 0.97 }}
+            whileHover={{ scale: 1.02 }}
+            className="btn-gradient"
             style={{
+              padding: "10px 20px",
+              fontSize: 13,
               display: "flex",
               alignItems: "center",
-              cursor: "pointer",
-              marginLeft: 12,
+              gap: 8,
             }}
+            onClick={handleTestNotification}
           >
-            <input
-              data-ocid="settings.toggle"
-              type="checkbox"
-              checked={notifPrefs.dailySummaryEnabled}
-              onChange={(e) =>
-                updatePrefs({ dailySummaryEnabled: e.target.checked })
-              }
-              style={{ accentColor: "#a78bfa", width: 16, height: 16 }}
-            />
-          </label>
+            \ud83d\udd14 Test Notification
+          </motion.button>
+          {testNotifMsg && (
+            <div
+              style={{
+                fontSize: 12,
+                color: testNotifMsg.startsWith("\u2705")
+                  ? "#4ade80"
+                  : "rgba(255,122,89,0.9)",
+                marginTop: 8,
+                fontWeight: 500,
+              }}
+            >
+              {testNotifMsg}
+            </div>
+          )}
         </div>
+
+        <Divider />
+
+        {/* Class Reminders */}
+        <ToggleRow
+          label="Class Reminders"
+          subtitle="Get a notification before each class starts"
+          checked={notifPrefs.classRemindersEnabled}
+          onChange={(v) => updatePrefs({ classRemindersEnabled: v })}
+        />
+        {notifPrefs.classRemindersEnabled && (
+          <div style={{ marginBottom: 14, paddingLeft: 4 }}>
+            <span
+              style={{
+                fontSize: 12,
+                color: "#A9B0C7",
+                display: "block",
+                marginBottom: 6,
+              }}
+            >
+              Remind me before class:
+            </span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {([5, 10, 15, 30] as const).map((min) => (
+                <button
+                  key={min}
+                  type="button"
+                  onClick={() => updatePrefs({ classReminderMinutes: min })}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: 8,
+                    border:
+                      notifPrefs.classReminderMinutes === min
+                        ? "1.5px solid #a78bfa"
+                        : "1px solid rgba(255,255,255,0.1)",
+                    background:
+                      notifPrefs.classReminderMinutes === min
+                        ? "rgba(167,139,250,0.2)"
+                        : "rgba(255,255,255,0.04)",
+                    color:
+                      notifPrefs.classReminderMinutes === min
+                        ? "#c4b5fd"
+                        : "#6B7590",
+                    fontSize: 12,
+                    fontWeight:
+                      notifPrefs.classReminderMinutes === min ? 700 : 400,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {min} min
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Divider />
+
+        {/* Daily Summary */}
+        <ToggleRow
+          label="Daily Class Summary"
+          subtitle="Morning summary of today\u2019s classes, tasks & exams"
+          checked={notifPrefs.dailySummaryEnabled}
+          onChange={(v) => updatePrefs({ dailySummaryEnabled: v })}
+        />
         {notifPrefs.dailySummaryEnabled && (
           <div style={{ marginBottom: 14, paddingLeft: 4 }}>
             <label
@@ -323,7 +457,7 @@ export function SettingsView({
                 marginBottom: 4,
               }}
             >
-              Notification Time
+              Daily Summary Time
             </label>
             <input
               id="daily-summary-time"
@@ -339,100 +473,131 @@ export function SettingsView({
           </div>
         )}
 
-        <div
-          style={{
-            borderTop: "1px solid rgba(255,255,255,0.06)",
-            margin: "4px 0 14px",
-          }}
-        />
+        <Divider />
 
         {/* Exam Reminders */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 14,
-          }}
-        >
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, color: "#D0D6F0", fontWeight: 600 }}>
-              Exam Reminders
-            </div>
-            <div style={{ fontSize: 11, color: "#6B7590" }}>
-              Alerts 1 week, 3 days, 1 day before exams
+        <ToggleRow
+          label="Exam Reminders"
+          subtitle="Alerts before upcoming exams"
+          checked={notifPrefs.examRemindersEnabled}
+          onChange={(v) => updatePrefs({ examRemindersEnabled: v })}
+        />
+        {notifPrefs.examRemindersEnabled && (
+          <div style={{ marginBottom: 14, paddingLeft: 4 }}>
+            <span
+              style={{
+                fontSize: 12,
+                color: "#A9B0C7",
+                display: "block",
+                marginBottom: 6,
+              }}
+            >
+              Exam reminder timing:
+            </span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {(["1d", "3d", "7d", "all"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => updatePrefs({ examReminderTiming: opt })}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: 8,
+                    border:
+                      notifPrefs.examReminderTiming === opt
+                        ? "1.5px solid #a78bfa"
+                        : "1px solid rgba(255,255,255,0.1)",
+                    background:
+                      notifPrefs.examReminderTiming === opt
+                        ? "rgba(167,139,250,0.2)"
+                        : "rgba(255,255,255,0.04)",
+                    color:
+                      notifPrefs.examReminderTiming === opt
+                        ? "#c4b5fd"
+                        : "#6B7590",
+                    fontSize: 12,
+                    fontWeight:
+                      notifPrefs.examReminderTiming === opt ? 700 : 400,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {opt === "1d"
+                    ? "1 day"
+                    : opt === "3d"
+                      ? "3 days"
+                      : opt === "7d"
+                        ? "1 week"
+                        : "All (1w, 3d, 1d)"}
+                </button>
+              ))}
             </div>
           </div>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              cursor: "pointer",
-              marginLeft: 12,
-            }}
-          >
-            <input
-              data-ocid="settings.toggle"
-              type="checkbox"
-              checked={notifPrefs.examRemindersEnabled}
-              onChange={(e) =>
-                updatePrefs({ examRemindersEnabled: e.target.checked })
-              }
-              style={{ accentColor: "#a78bfa", width: 16, height: 16 }}
-            />
-          </label>
-        </div>
+        )}
 
-        <div
-          style={{
-            borderTop: "1px solid rgba(255,255,255,0.06)",
-            margin: "4px 0 14px",
-          }}
-        />
+        <Divider />
 
         {/* Task Reminders */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 14,
-          }}
-        >
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, color: "#D0D6F0", fontWeight: 600 }}>
-              Task Reminders
-            </div>
-            <div style={{ fontSize: 11, color: "#6B7590" }}>
-              Alerts 2 days, 1 day, and on due date for tasks
+        <ToggleRow
+          label="Task Reminders"
+          subtitle="Alerts before task due dates"
+          checked={notifPrefs.taskRemindersEnabled}
+          onChange={(v) => updatePrefs({ taskRemindersEnabled: v })}
+        />
+        {notifPrefs.taskRemindersEnabled && (
+          <div style={{ marginBottom: 14, paddingLeft: 4 }}>
+            <span
+              style={{
+                fontSize: 12,
+                color: "#A9B0C7",
+                display: "block",
+                marginBottom: 6,
+              }}
+            >
+              Task reminder timing:
+            </span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {(["1d", "2d", "both"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => updatePrefs({ taskReminderTiming: opt })}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: 8,
+                    border:
+                      notifPrefs.taskReminderTiming === opt
+                        ? "1.5px solid #a78bfa"
+                        : "1px solid rgba(255,255,255,0.1)",
+                    background:
+                      notifPrefs.taskReminderTiming === opt
+                        ? "rgba(167,139,250,0.2)"
+                        : "rgba(255,255,255,0.04)",
+                    color:
+                      notifPrefs.taskReminderTiming === opt
+                        ? "#c4b5fd"
+                        : "#6B7590",
+                    fontSize: 12,
+                    fontWeight:
+                      notifPrefs.taskReminderTiming === opt ? 700 : 400,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {opt === "1d"
+                    ? "1 day before"
+                    : opt === "2d"
+                      ? "2 days before"
+                      : "Both (2d & 1d)"}
+                </button>
+              ))}
             </div>
           </div>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              cursor: "pointer",
-              marginLeft: 12,
-            }}
-          >
-            <input
-              data-ocid="settings.toggle"
-              type="checkbox"
-              checked={notifPrefs.taskRemindersEnabled}
-              onChange={(e) =>
-                updatePrefs({ taskRemindersEnabled: e.target.checked })
-              }
-              style={{ accentColor: "#a78bfa", width: 16, height: 16 }}
-            />
-          </label>
-        </div>
+        )}
 
-        <div
-          style={{
-            borderTop: "1px solid rgba(255,255,255,0.06)",
-            margin: "4px 0 14px",
-          }}
-        />
+        <Divider />
 
         {/* Custom Reminders */}
         <div style={{ marginBottom: 10 }}>
@@ -487,7 +652,7 @@ export function SettingsView({
                   padding: "0 4px",
                 }}
               >
-                ×
+                \u00d7
               </motion.button>
             </div>
           ))}
@@ -528,6 +693,7 @@ export function SettingsView({
         </div>
       </GlassCard>
 
+      {/* Danger Zone */}
       <GlassCard style={{ borderColor: "rgba(255,122,89,0.3)" }}>
         <div
           style={{
@@ -551,6 +717,7 @@ export function SettingsView({
         </motion.button>
       </GlassCard>
 
+      {/* Footer branding */}
       <div style={{ marginTop: 32, textAlign: "center", padding: "16px 0" }}>
         <div
           style={{
@@ -561,8 +728,8 @@ export function SettingsView({
           }}
         >
           Created by{" "}
-          <span style={{ color: "#a78bfa", fontWeight: 700 }}>BHARATH</span> ·
-          BE24
+          <span style={{ color: "#a78bfa", fontWeight: 700 }}>BHARATH</span>{" "}
+          \u00b7 BE24
         </div>
         <div
           style={{

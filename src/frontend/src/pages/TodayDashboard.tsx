@@ -3,10 +3,17 @@ import { GlassCard } from "../components/GlassCard";
 import { ProgressBar } from "../components/ProgressBar";
 import { useTabTheme } from "../contexts/TabTheme";
 import { useCountUp } from "../hooks/useCountUp";
-import type { AttendanceRecord, Course, SemSettings, Task } from "../types";
+import type {
+  AttendanceRecord,
+  Course,
+  SemSettings,
+  Task,
+  TimetableEntry,
+} from "../types";
 import { calcAttendance } from "../utils/attendance";
 import { getHolidaysForSem, isHoliday } from "../utils/holidays";
 import { getSemCalendar, isExamPeriod } from "../utils/semester";
+import { getClassesOnDayFromEntries } from "../utils/slots";
 import { getClassesOnDay } from "../utils/slots";
 
 function StatCard({
@@ -46,6 +53,7 @@ function StatCard({
 
 interface Props {
   courses: Course[];
+  timetableEntries?: TimetableEntry[];
   attendance: AttendanceRecord[];
   tasks: Task[];
   semSettings: SemSettings;
@@ -55,6 +63,7 @@ interface Props {
 
 export function TodayDashboard({
   courses,
+  timetableEntries = [],
   attendance,
   tasks,
   semSettings,
@@ -74,7 +83,17 @@ export function TodayDashboard({
   const todayHoliday = isHoliday(todayStr, holidays);
   const examPeriod = isExamPeriod(todayStr, cal);
 
-  const todaysClasses = todayHoliday ? [] : getClassesOnDay(dayOfWeek, courses);
+  const todaysClasses = todayHoliday
+    ? []
+    : timetableEntries.length > 0
+      ? getClassesOnDayFromEntries(dayOfWeek, timetableEntries)
+      : getClassesOnDay(dayOfWeek, courses);
+
+  // Unique course count from entries (includes EXTRA_6_8), fallback to courses.length
+  const uniqueCourseCount =
+    timetableEntries.length > 0
+      ? new Set(timetableEntries.map((e) => e.courseId)).size
+      : courses.length;
 
   const upcomingTasks = tasks
     .filter((t) => !t.completed && t.date >= todayStr)
@@ -155,17 +174,27 @@ export function TodayDashboard({
 
       {/* Stats */}
       <div
+        data-ocid="today.section"
+        className="hide-scrollbar"
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          display: "flex",
           gap: 12,
           marginBottom: 16,
+          overflowX: "auto",
+          paddingBottom: 8,
+          paddingRight: 16,
+          WebkitOverflowScrolling: "touch",
+          scrollSnapType: "x mandatory",
+          scrollbarWidth: "none",
+          msOverflowStyle: "none",
+          width: "100%",
+          maxWidth: "100vw",
         }}
       >
         {[
           {
             label: "Courses",
-            value: courses.length,
+            value: uniqueCourseCount,
             icon: "📚",
             color: "#a78bfa",
           },
@@ -188,9 +217,43 @@ export function TodayDashboard({
             color: "rgba(255,122,89,0.85)",
           },
         ].map((stat, i) => (
-          <StatCard key={stat.label} stat={stat} delay={0.08 + i * 0.08} />
+          <div
+            key={stat.label}
+            style={{
+              minWidth: 140,
+              flex: "0 0 auto",
+              scrollSnapAlign: "start",
+            }}
+          >
+            <StatCard stat={stat} delay={0.08 + i * 0.08} />
+          </div>
         ))}
       </div>
+
+      {/* Smart Alert Banner */}
+      {alertCourses.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          data-ocid="today.error_state"
+          style={{
+            marginBottom: 16,
+            padding: "12px 16px",
+            borderRadius: 12,
+            background: "rgba(255, 80, 80, 0.08)",
+            border: "1px solid rgba(255, 80, 80, 0.3)",
+            color: "rgba(255, 80, 80, 0.9)",
+            fontSize: 14,
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          ⚠️ Your attendance is below 75% in {alertCourses.length} subject
+          {alertCourses.length > 1 ? "s" : ""}
+        </motion.div>
+      )}
 
       {/* Classes + Tasks */}
       <motion.div

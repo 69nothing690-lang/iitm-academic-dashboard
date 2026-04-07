@@ -134,6 +134,7 @@ export function CalendarView({ courses, tasks, semSettings }: Props) {
       </h2>
 
       <div
+        className="calendar-layout-grid"
         style={{
           display: "grid",
           gridTemplateColumns: selectedDate ? "1fr 310px" : "1fr",
@@ -329,20 +330,62 @@ export function CalendarView({ courses, tasks, semSettings }: Props) {
               >
                 <div
                   style={{
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: "#F0F4FF",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
                     marginBottom: 16,
                   }}
                 >
-                  {new Date(`${selectedDate}T12:00`).toLocaleDateString(
-                    "en-IN",
-                    {
-                      weekday: "long",
-                      month: "long",
-                      day: "numeric",
-                    },
-                  )}
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: "#F0F4FF",
+                    }}
+                  >
+                    {new Date(`${selectedDate}T12:00`).toLocaleDateString(
+                      "en-IN",
+                      {
+                        weekday: "long",
+                        month: "long",
+                        day: "numeric",
+                      },
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(null)}
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 8,
+                      color: "rgba(200,208,232,0.7)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      padding: "4px 10px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      fontFamily: "inherit",
+                      transition: "all 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background =
+                        "rgba(255,255,255,0.12)";
+                      (e.currentTarget as HTMLButtonElement).style.color =
+                        "#f0f4ff";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background =
+                        "rgba(255,255,255,0.07)";
+                      (e.currentTarget as HTMLButtonElement).style.color =
+                        "rgba(200,208,232,0.7)";
+                    }}
+                    data-ocid="calendar.detail.close_button"
+                  >
+                    ← Back
+                  </button>
                 </div>
 
                 {isLastDayOfClasses && (

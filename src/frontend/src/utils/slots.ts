@@ -1,6 +1,6 @@
 import type { Course } from "../types";
 
-// ─── Time Columns ─────────────────────────────────────────────────────────────
+// ─── Time Columns ───────────────────────────────────────────────────────────────────────────────
 export interface TimeColumn {
   label: string;
   start: string;
@@ -19,7 +19,15 @@ export const TIME_COLUMNS: TimeColumn[] = [
   { label: "17:00–17:50", start: "17:00", end: "17:50" },
 ];
 
-// ─── Slot Grid ────────────────────────────────────────────────────────────────
+// Extra slot column index (virtual — after index 8)
+export const EXTRA_SLOT_COL_INDEX = 9;
+export const EXTRA_SLOT_TIME: TimeColumn = {
+  label: "18:00–20:00",
+  start: "18:00",
+  end: "20:00",
+};
+
+// ─── Slot Grid ───────────────────────────────────────────────────────────────────────────────
 // Cols 6 and 7 use [top, bottom] tuples for split cells
 export const SLOT_GRID: (string | null | [string | null, string | null])[][] = [
   ["A", "B", "C", "D", null, "G", ["P", "H"], ["P", "M"], "J"], // Mon
@@ -29,7 +37,7 @@ export const SLOT_GRID: (string | null | [string | null, string | null])[][] = [
   ["F", "G", "A", "B", null, "C", ["T", "K"], ["T", "L"], "E"], // Fri
 ];
 
-// ─── Slot Occurrences ─────────────────────────────────────────────────────────
+// ─── Slot Occurrences ────────────────────────────────────────────────────────────────────────
 export const SLOT_OCCURRENCES: Record<
   string,
   Array<{ day: number; col: number }>
@@ -104,7 +112,7 @@ export const SLOT_OCCURRENCES: Record<
   T: [{ day: 4, col: 6 }],
 };
 
-// ─── Colors ───────────────────────────────────────────────────────────────────
+// ─── Colors ──────────────────────────────────────────────────────────────────────────────────
 export const PASTEL_COLORS = [
   "#A8D5BA",
   "#B8C9F0",
@@ -150,15 +158,17 @@ const DEFAULT_SLOT_COLORS: Record<string, string> = {
   R: "#F9E8D5",
   S: "#D5E8F9",
   T: "#F9D5E8",
+  EXTRA_6_8: "#C4B5FD",
 };
 
 export function getSlotColor(slot: string): string {
   return DEFAULT_SLOT_COLORS[slot] ?? "#B8C9F0";
 }
 
-// ─── Class Info ────────────────────────────────────────────────────────────────
+// ─── Class Info ───────────────────────────────────────────────────────────────────────────────
 export interface ClassInfo {
   id: string;
+  entryId?: string; // TimetableEntry id (unique per cell)
   name: string;
   code: string;
   slot: string;
@@ -198,6 +208,37 @@ export function getClassesOnDay(
   return results;
 }
 
+/**
+ * Get today's classes from TimetableEntries (new data model).
+ * Also includes EXTRA_6_8 slots.
+ */
+export function getClassesOnDayFromEntries(
+  dayOfWeek: number,
+  entries: import("../types").TimetableEntry[],
+): ClassInfo[] {
+  const dayIdx = dayOfWeek - 1;
+  if (dayIdx < 0 || dayIdx > 4) return [];
+
+  const results: ClassInfo[] = [];
+  for (const entry of entries) {
+    if (entry.day === dayIdx) {
+      results.push({
+        id: entry.courseId,
+        entryId: entry.id,
+        name: entry.courseName,
+        code: entry.courseCode,
+        slot: entry.slot,
+        venue: entry.venue,
+        color: entry.color ?? DEFAULT_SLOT_COLORS[entry.slot] ?? "#B8C9F0",
+        startTime: entry.startTime,
+        endTime: entry.endTime,
+      });
+    }
+  }
+  results.sort((a, b) => a.startTime.localeCompare(b.startTime));
+  return results;
+}
+
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export const DAY_FULL = [
   "Sunday",
@@ -210,6 +251,7 @@ export const DAY_FULL = [
 ];
 
 export function getSlotScheduleDesc(slot: string): string {
+  if (slot === "EXTRA_6_8") return "Mon–Fri 18:00–20:00";
   const occs = SLOT_OCCURRENCES[slot] ?? [];
   const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
   return occs

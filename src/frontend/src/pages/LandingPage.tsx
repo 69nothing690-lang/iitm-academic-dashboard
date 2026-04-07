@@ -1,15 +1,5 @@
 import { motion, useScroll, useTransform } from "motion/react";
-import {
-  Suspense,
-  lazy,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { RobotCursor } from "../components/RobotCursor";
-
-const SplineViewer = lazy(() => import("@splinetool/react-spline"));
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface LandingPageProps {
   onEnter: () => void;
@@ -22,19 +12,40 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
   const [adminUser, setAdminUser] = useState("");
   const [adminPass, setAdminPass] = useState("");
   const [adminError, setAdminError] = useState("");
-  const [splineLoaded, setSplineLoaded] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
   const { scrollY } = useScroll();
-  const splineOpacity = useTransform(scrollY, [0, 600], [1, 0.3]);
+  const bgOpacity = useTransform(scrollY, [0, 600], [1, 0.3]);
 
   const orb1Ref = useRef<HTMLDivElement>(null);
   const orb2Ref = useRef<HTMLDivElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const [splineLoaded, setSplineLoaded] = useState(false);
 
-  // Canvas particle fallback — shown until Spline loads
+  // Load Spline viewer script dynamically
+  useEffect(() => {
+    // Check if already loaded
+    if (customElements.get("spline-viewer")) {
+      setSplineLoaded(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.type = "module";
+    script.src =
+      "https://unpkg.com/@splinetool/viewer@1.12.73/build/spline-viewer.js";
+    script.onload = () => setSplineLoaded(true);
+    document.head.appendChild(script);
+    return () => {
+      try {
+        document.head.removeChild(script);
+      } catch {}
+    };
+  }, []);
+
+  // Fallback canvas particles (shown while Spline loads or if unavailable)
   useEffect(() => {
     const el = canvasContainerRef.current;
     if (!el) return;
+    if (splineLoaded) return; // Spline is active, skip canvas
     const canvas = document.createElement("canvas");
     canvas.style.width = "100%";
     canvas.style.height = "100%";
@@ -57,14 +68,14 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
       r: number;
       alpha: number;
     }[] = [];
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 120; i++) {
       particles.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.4,
-        vy: (Math.random() - 0.5) * 0.4,
-        r: Math.random() * 2 + 0.5,
-        alpha: Math.random() * 0.5 + 0.1,
+        vx: (Math.random() - 0.5) * 0.5,
+        vy: (Math.random() - 0.5) * 0.5,
+        r: Math.random() * 2.5 + 0.5,
+        alpha: Math.random() * 0.6 + 0.1,
       });
     }
 
@@ -83,6 +94,22 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
         ctx.fillStyle = `rgba(139,92,246,${p.alpha})`;
         ctx.fill();
       }
+      // Draw subtle connecting lines
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 80) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = `rgba(139,92,246,${0.08 * (1 - dist / 80)})`;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
       animId = requestAnimationFrame(draw);
     };
     draw();
@@ -92,7 +119,7 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
       window.removeEventListener("resize", resize);
       if (el.contains(canvas)) el.removeChild(canvas);
     };
-  }, []);
+  }, [splineLoaded]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -113,7 +140,11 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
     }
   }, []);
 
-  const stagger = (i: number) => ({ delay: 0.05 + i * 0.08 });
+  const stagger = (i: number) => ({
+    delay: Math.max(0, 0.02 + i * 0.05) as number,
+    duration: 0.35,
+    ease: "easeOut" as const,
+  });
 
   const handleAdminLogin = () => {
     if (adminUser === "BE24B034" && adminPass === "bobbe@2006") {
@@ -145,11 +176,10 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
       {/* Dark base */}
       <div className="landing-bg" />
 
-      {/* Canvas particle fallback — visible until Spline loads */}
+      {/* Canvas particle animation — full page */}
       <motion.div
-        animate={{ opacity: splineLoaded ? 0 : 1 }}
-        transition={{ duration: 1.5, ease: "easeInOut" }}
         style={{
+          opacity: bgOpacity,
           position: "fixed",
           inset: 0,
           zIndex: 0,
@@ -157,40 +187,41 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
           overflow: "hidden",
         }}
       >
-        <div
-          ref={canvasContainerRef}
-          style={{
-            width: "100%",
-            height: "100%",
-            display: "block",
-          }}
-        />
-      </motion.div>
-
-      {/* Spline 3D — full page, fades in on load */}
-      <motion.div
-        style={{
-          opacity: splineOpacity,
-          position: "fixed",
-          inset: 0,
-          zIndex: 1,
-          overflow: "hidden",
-        }}
-      >
-        <Suspense fallback={null}>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: splineLoaded ? 1 : 0 }}
-            transition={{ duration: 1.4, ease: "easeInOut" }}
-            style={{ width: "100%", height: "100%" }}
-          >
-            <SplineViewer
-              scene="https://prod.spline.design/atbUfD8ybgiIefp4/scene.splinecode"
-              onLoad={() => setSplineLoaded(true)}
-              style={{ width: "100%", height: "100%", display: "block" }}
+        {splineLoaded ? (
+          <>
+            {/* Watermark blocker — covers the Spline "Made with Spline" badge */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: 0,
+                right: 0,
+                width: 200,
+                height: 50,
+                background: "#060810",
+                zIndex: 10,
+                pointerEvents: "none",
+              }}
             />
-          </motion.div>
-        </Suspense>
+            {/* @ts-ignore */}
+            <spline-viewer
+              url="https://prod.spline.design/atbUfD8ybgiIefp4/scene.splinecode"
+              style={{
+                width: "100%",
+                height: "100%",
+                display: "block",
+              }}
+            />
+          </>
+        ) : (
+          <div
+            ref={canvasContainerRef}
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "block",
+            }}
+          />
+        )}
       </motion.div>
 
       <div ref={orb1Ref} className="landing-orb landing-orb-1" />
@@ -202,9 +233,6 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
 
       {/* Bottom fade to features */}
       <div className="landing-spline-bottom-fade" />
-
-      {/* Cursor-following robot — fixed bottom-left */}
-      <RobotCursor />
 
       {/* Navbar */}
       <motion.nav
@@ -366,7 +394,7 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ delay: 0.7 }}
+            transition={{ delay: 0.25 }}
             className="landing-stats"
           >
             {[
@@ -398,6 +426,25 @@ export function LandingPage({ onEnter, onAdmin }: LandingPageProps) {
         >
           Everything you need
         </motion.h2>
+        {/* Mobile horizontal scroll hint */}
+        <div
+          className="landing-features-scroll-hint"
+          style={{
+            display: "none",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            marginBottom: 10,
+            fontSize: 11,
+            color: "rgba(167,139,250,0.7)",
+            fontWeight: 500,
+            letterSpacing: "0.04em",
+          }}
+        >
+          <span>&#8592;</span>
+          <span>Swipe to see all features</span>
+          <span>&#8594;</span>
+        </div>
         <div className="landing-features-grid">
           {[
             {

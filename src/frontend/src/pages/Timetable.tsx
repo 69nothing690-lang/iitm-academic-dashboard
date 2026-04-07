@@ -1,9 +1,11 @@
 import { AnimatePresence, motion } from "motion/react";
 import type React from "react";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { GlassCard } from "../components/GlassCard";
-import type { Course } from "../types";
+import type { Course, TimetableEntry } from "../types";
 import {
+  EXTRA_SLOT_COL_INDEX,
+  EXTRA_SLOT_TIME,
   PASTEL_COLORS,
   SLOT_GRID,
   SLOT_OCCURRENCES,
@@ -12,26 +14,21 @@ import {
   getSlotScheduleDesc,
 } from "../utils/slots";
 
-interface EveningSlot {
-  id: string;
-  courseName: string;
-  courseCode: string;
-  venue: string;
-  days: string[];
-  startTime: string;
-  endTime: string;
-}
-
 interface Props {
   courses: Course[];
   onAddCourse: (c: Course) => void;
   onDeleteCourse: (id: string) => void;
+  timetableEntries: TimetableEntry[];
+  onAddTimetableEntries: (entries: TimetableEntry[]) => void;
+  onDeleteTimetableEntry: (id: string) => void;
+  onDeleteEntriesForCourse: (courseId: string) => void;
 }
 
 const DAY_LABELS = ["MON", "TUE", "WED", "THU", "FRI"];
-const ALL_SLOTS = Object.keys(SLOT_OCCURRENCES).sort();
+const DAY_SHORTS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+const ALL_SLOTS = [...Object.keys(SLOT_OCCURRENCES).sort(), "EXTRA_6_8"];
 
-// ─── IITM Course Database (for Populate) ───────────────────────────────────
+// IITM Course Database
 const IITM_COURSE_DB: Record<string, { name: string; venue: string }> = {
   MA1101: { name: "Calculus", venue: "CLT" },
   MA1102: { name: "Linear Algebra", venue: "CLT" },
@@ -72,7 +69,6 @@ const IITM_COURSE_DB: Record<string, { name: string; venue: string }> = {
   MS2100: { name: "Materials Science", venue: "MED 115" },
 };
 
-// ─── Override type ──────────────────────────────────────────────────────────
 interface DayOverride {
   id: string;
   day: string;
@@ -83,7 +79,27 @@ interface DayOverride {
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
-export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
+// Unique ID generator
+const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+function getColTime(colIdx: number): { start: string; end: string } {
+  if (colIdx === EXTRA_SLOT_COL_INDEX)
+    return { start: EXTRA_SLOT_TIME.start, end: EXTRA_SLOT_TIME.end };
+  return {
+    start: TIME_COLUMNS[colIdx]?.start ?? "00:00",
+    end: TIME_COLUMNS[colIdx]?.end ?? "00:00",
+  };
+}
+
+export function Timetable({
+  courses,
+  onAddCourse,
+  onDeleteCourse,
+  timetableEntries,
+  onAddTimetableEntries,
+  onDeleteTimetableEntry,
+  onDeleteEntriesForCourse,
+}: Props) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -92,6 +108,16 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
   const [selectedColor, setSelectedColor] = useState(PASTEL_COLORS[0]);
   const [hoursPerWeek, setHoursPerWeek] = useState(3);
   const [populateMsg, setPopulateMsg] = useState("");
+
+  // Extra slot form (now uses timetableEntries)
+  const [showEveningSection, setShowEveningSection] = useState(false);
+  const [showEveningForm, setShowEveningForm] = useState(false);
+  const [evName, setEvName] = useState("");
+  const [evCode, setEvCode] = useState("");
+  const [evVenue, setEvVenue] = useState("");
+  const [evDays, setEvDays] = useState<number[]>([]); // day indices 0-4
+  const [evStart, setEvStart] = useState("18:00");
+  const [evEnd, setEvEnd] = useState("20:00");
 
   // Manual Overrides
   const [overrides, setOverrides] = useState<DayOverride[]>(() => {
@@ -108,63 +134,10 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
   const [ovName, setOvName] = useState("");
   const [ovTime, setOvTime] = useState("");
 
-  // Cell delete confirmation
-  // Evening slots (6–8 PM)
-  const [eveningSlots, setEveningSlots] = useState<EveningSlot[]>(() => {
-    try {
-      const saved = localStorage.getItem("instiflow_evening_slots");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [showEveningSection, setShowEveningSection] = useState(false);
-  const [showEveningForm, setShowEveningForm] = useState(false);
-  const [evName, setEvName] = useState("");
-  const [evCode, setEvCode] = useState("");
-  const [evVenue, setEvVenue] = useState("");
-  const [evDays, setEvDays] = useState<string[]>([]);
-  const [evStart, setEvStart] = useState("18:00");
-  const [evEnd, setEvEnd] = useState("20:00");
-
-  const saveEveningSlots = (slots: EveningSlot[]) => {
-    setEveningSlots(slots);
-    localStorage.setItem("instiflow_evening_slots", JSON.stringify(slots));
-  };
-
-  const addEveningSlot = () => {
-    if (!evName.trim()) return;
-    const newSlot: EveningSlot = {
-      id: Date.now().toString(),
-      courseName: evName.trim(),
-      courseCode: evCode.trim(),
-      venue: evVenue.trim(),
-      days: evDays,
-      startTime: evStart,
-      endTime: evEnd,
-    };
-    saveEveningSlots([...eveningSlots, newSlot]);
-    setEvName("");
-    setEvCode("");
-    setEvVenue("");
-    setEvDays([]);
-    setEvStart("18:00");
-    setEvEnd("20:00");
-    setShowEveningForm(false);
-  };
-
-  const deleteEveningSlot = (id: string) => {
-    saveEveningSlots(eveningSlots.filter((s) => s.id !== id));
-  };
-
-  const toggleEvDay = (day: string) => {
-    setEvDays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
-    );
-  };
-
+  // Delete confirmation
   const [deleteCell, setDeleteCell] = useState<{
-    courseId?: string;
+    entryId?: string; // NEW: TimetableEntry id
+    courseId?: string; // for legacy course-level delete (course cards)
     overrideKey?: string;
     label: string;
   } | null>(null);
@@ -178,36 +151,102 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
     localStorage.setItem("instiflow_overrides", JSON.stringify(list));
   };
 
-  const slotToCourse = useMemo(() => {
-    const map = new Map<string, Course>();
-    for (const c of courses) {
-      map.set(c.slot, c);
+  // Build entry lookup: day -> colIndex -> TimetableEntry[]
+  const entryGrid = useMemo(() => {
+    const grid = new Map<string, TimetableEntry[]>();
+    for (const e of timetableEntries) {
+      const key = `${e.day}__${e.colIndex}`;
+      const existing = grid.get(key) ?? [];
+      grid.set(key, [...existing, e]);
+    }
+    return grid;
+  }, [timetableEntries]);
+
+  // Build extra slot entries by day
+  const extraByDay = useMemo(() => {
+    const map = new Map<number, TimetableEntry[]>();
+    for (const e of timetableEntries) {
+      if (e.slot === "EXTRA_6_8") {
+        const existing = map.get(e.day) ?? [];
+        map.set(e.day, [...existing, e]);
+      }
     }
     return map;
-  }, [courses]);
+  }, [timetableEntries]);
 
-  // Build override lookup: dayLabel -> slotLetter -> override info
+  // Build unique course IDs that appear in extra slots for the legend
+  const extraSlotEntries = useMemo(
+    () => timetableEntries.filter((e) => e.slot === "EXTRA_6_8"),
+    [timetableEntries],
+  );
+
+  // State for remove-course dropdown
+  const [removeCourseId, setRemoveCourseId] = useState<string>("");
+
+  // Build override lookup
   const overrideLookup = useMemo(() => {
     const map = new Map<string, { name: string; time?: string }>();
     for (const ov of overrides) {
-      // day is full name like "Monday", convert to 3-letter
       const dayShort = ov.day.slice(0, 3).toUpperCase();
       map.set(`${dayShort}__${ov.slot}`, { name: ov.name, time: ov.time });
     }
     return map;
   }, [overrides]);
 
-  const handleAdd = () => {
+  const handleAdd = useCallback(() => {
     if (!name.trim()) return;
-    onAddCourse({
-      id: Date.now().toString(),
+    const courseId = uid();
+    const newCourse: Course = {
+      id: courseId,
       name: name.trim(),
       code: code.trim(),
       slot,
       venue: venue.trim() || undefined,
       color: selectedColor,
       hoursPerWeek,
-    });
+    };
+    onAddCourse(newCourse);
+
+    // Create TimetableEntry for each occurrence of this slot
+    const newEntries: TimetableEntry[] = [];
+    if (slot === "EXTRA_6_8") {
+      // EXTRA slot: entries for all 5 days by default
+      for (let day = 0; day < 5; day++) {
+        newEntries.push({
+          id: uid(),
+          courseId,
+          courseName: name.trim(),
+          courseCode: code.trim(),
+          slot: "EXTRA_6_8",
+          day,
+          colIndex: EXTRA_SLOT_COL_INDEX,
+          startTime: EXTRA_SLOT_TIME.start,
+          endTime: EXTRA_SLOT_TIME.end,
+          venue: venue.trim() || undefined,
+          color: selectedColor,
+        });
+      }
+    } else {
+      const occs = SLOT_OCCURRENCES[slot] ?? [];
+      for (const occ of occs) {
+        const colTime = getColTime(occ.col);
+        newEntries.push({
+          id: uid(),
+          courseId,
+          courseName: name.trim(),
+          courseCode: code.trim(),
+          slot,
+          day: occ.day,
+          colIndex: occ.col,
+          startTime: colTime.start,
+          endTime: colTime.end,
+          venue: venue.trim() || undefined,
+          color: selectedColor,
+        });
+      }
+    }
+    onAddTimetableEntries(newEntries);
+
     setName("");
     setCode("");
     setVenue("");
@@ -216,7 +255,16 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
     setHoursPerWeek(3);
     setShowForm(false);
     setPopulateMsg("");
-  };
+  }, [
+    name,
+    code,
+    slot,
+    venue,
+    selectedColor,
+    hoursPerWeek,
+    onAddCourse,
+    onAddTimetableEntries,
+  ]);
 
   const handlePopulate = () => {
     const key = code.trim().toUpperCase();
@@ -228,7 +276,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
     if (found) {
       setName(found.name);
       setVenue(found.venue);
-      setPopulateMsg(`✓ Populated from database: ${key}`);
+      setPopulateMsg(`\u2713 Populated from database: ${key}`);
     } else {
       setPopulateMsg(`Course "${key}" not found in database.`);
     }
@@ -237,7 +285,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
   const handleAddOverride = () => {
     if (!ovSlot) return;
     const newOv: DayOverride = {
-      id: Date.now().toString(),
+      id: uid(),
       day: ovDay,
       slot: ovSlot,
       name: ovName.trim(),
@@ -257,8 +305,53 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
     setShowOverrideForm(false);
   };
 
+  const addEveningSlotEntries = () => {
+    if (!evName.trim()) return;
+    const courseId = uid();
+    const newCourse: Course = {
+      id: courseId,
+      name: evName.trim(),
+      code: evCode.trim(),
+      slot: "EXTRA_6_8",
+      venue: evVenue.trim() || undefined,
+      color: "#C4B5FD",
+    };
+    onAddCourse(newCourse);
+
+    const newEntries: TimetableEntry[] = evDays.map((dayIdx) => ({
+      id: uid(),
+      courseId,
+      courseName: evName.trim(),
+      courseCode: evCode.trim(),
+      slot: "EXTRA_6_8",
+      day: dayIdx,
+      colIndex: EXTRA_SLOT_COL_INDEX,
+      startTime: evStart,
+      endTime: evEnd,
+      venue: evVenue.trim() || undefined,
+      color: "#C4B5FD",
+    }));
+    onAddTimetableEntries(newEntries);
+
+    setEvName("");
+    setEvCode("");
+    setEvVenue("");
+    setEvDays([]);
+    setEvStart("18:00");
+    setEvEnd("20:00");
+    setShowEveningForm(false);
+  };
+
+  const toggleEvDay = (dayIdx: number) => {
+    setEvDays((prev) =>
+      prev.includes(dayIdx)
+        ? prev.filter((d) => d !== dayIdx)
+        : [...prev, dayIdx],
+    );
+  };
+
   const handleSaveData = () => {
-    const data = { courses, overrides };
+    const data = { courses, overrides, timetableEntries };
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
     });
@@ -278,19 +371,260 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
       try {
         const parsed = JSON.parse(ev.target?.result as string);
         if (parsed.courses && Array.isArray(parsed.courses)) {
-          for (const c of parsed.courses) {
-            onAddCourse(c);
-          }
+          for (const c of parsed.courses) onAddCourse(c);
+        }
+        if (parsed.timetableEntries && Array.isArray(parsed.timetableEntries)) {
+          onAddTimetableEntries(parsed.timetableEntries);
         }
         if (parsed.overrides && Array.isArray(parsed.overrides)) {
           saveOverrides(parsed.overrides);
         }
       } catch {
-        // silently fail
+        /* silently fail */
       }
     };
     reader.readAsText(file);
     e.target.value = "";
+  };
+
+  // ── Renders a single grid cell content (normal slot) ──
+  const renderCellEntries = (
+    cellEntries: TimetableEntry[],
+    slotLetter: string | null,
+    dayLabel: string,
+    _colIdx: number,
+  ) => {
+    const overrideInfo = slotLetter
+      ? (overrideLookup.get(`${dayLabel}__${slotLetter}`) ?? null)
+      : null;
+    const overrideName = overrideInfo?.name ?? null;
+    const overrideTime = overrideInfo?.time ?? null;
+    const filled = cellEntries.length > 0 || !!overrideName;
+    const firstEntry = cellEntries[0] ?? null;
+    const bg = firstEntry?.color ?? null;
+    const hasMultiple = cellEntries.length > 1;
+
+    return {
+      filled,
+      bg: overrideName
+        ? "rgba(139,92,246,0.22)"
+        : hasMultiple
+          ? "linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.18))"
+          : (bg ?? "#13151f"),
+      content: (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 1,
+            height: "100%",
+            width: "100%",
+          }}
+        >
+          {slotLetter && (
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 600,
+                color: filled ? "rgba(0,0,0,0.55)" : "#252840",
+                lineHeight: 1,
+              }}
+            >
+              ({slotLetter})
+            </span>
+          )}
+          {filled &&
+            (hasMultiple ? (
+              <div
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 1,
+                }}
+              >
+                {cellEntries.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteCell({
+                        entryId: entry.id,
+                        label: `${entry.courseName} (${DAY_SHORTS[entry.day]} ${entry.startTime})`,
+                      });
+                    }}
+                    style={{
+                      padding: "1px 2px",
+                      borderRadius: 3,
+                      background: entry.color
+                        ? `${entry.color}CC`
+                        : "rgba(139,92,246,0.3)",
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      border: "none",
+                      width: "100%",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 800,
+                        color: "rgba(0,0,0,0.88)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        maxWidth: "95%",
+                        display: "block",
+                      }}
+                    >
+                      {entry.courseCode || entry.courseName.slice(0, 6)}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 7,
+                        color: "rgba(0,0,0,0.6)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        maxWidth: "95%",
+                        display: "block",
+                      }}
+                    >
+                      {entry.courseName.length > 10
+                        ? `${entry.courseName.slice(0, 9)}\u2026`
+                        : entry.courseName}
+                    </span>
+                    <span
+                      className="print-hide"
+                      style={{ fontSize: 6, color: "rgba(0,0,0,0.35)" }}
+                    >
+                      \u00d7 rm
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : firstEntry ? (
+              <>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: "rgba(0,0,0,0.88)",
+                    lineHeight: 1.15,
+                    marginTop: 2,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    maxWidth: "95%",
+                    display: "block",
+                  }}
+                >
+                  {overrideName || firstEntry.courseCode || ""}
+                </span>
+                {firstEntry.courseName && (
+                  <span
+                    style={{
+                      fontSize: 8,
+                      color: "rgba(0,0,0,0.6)",
+                      lineHeight: 1.2,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      maxWidth: "95%",
+                      display: "block",
+                    }}
+                  >
+                    {firstEntry.courseName.length > 14
+                      ? `${firstEntry.courseName.slice(0, 13)}\u2026`
+                      : firstEntry.courseName}
+                  </span>
+                )}
+                {firstEntry.venue && (
+                  <span
+                    style={{
+                      fontSize: 8,
+                      color: "rgba(0,0,0,0.5)",
+                      lineHeight: 1.1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      maxWidth: "95%",
+                      display: "block",
+                    }}
+                  >
+                    {firstEntry.venue}
+                  </span>
+                )}
+                {overrideTime && (
+                  <span
+                    style={{
+                      fontSize: 7,
+                      color: "rgba(0,0,0,0.45)",
+                      lineHeight: 1.1,
+                      display: "block",
+                    }}
+                  >
+                    \u23f0 {overrideTime}
+                  </span>
+                )}
+                <span
+                  className="print-hide"
+                  style={{
+                    fontSize: 7,
+                    color: "rgba(0,0,0,0.35)",
+                    marginTop: 1,
+                  }}
+                >
+                  tap to remove
+                </span>
+              </>
+            ) : overrideName ? (
+              <>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: "rgba(0,0,0,0.88)",
+                    lineHeight: 1.15,
+                    marginTop: 2,
+                    display: "block",
+                  }}
+                >
+                  {overrideName}
+                </span>
+                {overrideTime && (
+                  <span
+                    style={{
+                      fontSize: 7,
+                      color: "rgba(0,0,0,0.45)",
+                      lineHeight: 1.1,
+                      display: "block",
+                    }}
+                  >
+                    \u23f0 {overrideTime}
+                  </span>
+                )}
+                <span
+                  className="print-hide"
+                  style={{
+                    fontSize: 7,
+                    color: "rgba(0,0,0,0.35)",
+                    marginTop: 1,
+                  }}
+                >
+                  tap to remove
+                </span>
+              </>
+            ) : null)}
+        </div>
+      ),
+    };
   };
 
   return (
@@ -332,7 +666,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
             onClick={() => window.print()}
             style={{ fontSize: 13, padding: "8px 16px" }}
           >
-            🖨️ Print
+            \ud83d\udda8\ufe0f Print
           </motion.button>
           <motion.button
             data-ocid="timetable.primary_button"
@@ -341,12 +675,12 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
             onClick={() => setShowForm(!showForm)}
             style={{ fontSize: 13, padding: "8px 18px" }}
           >
-            {showForm ? "✕ Cancel" : "+ Add Course"}
+            {showForm ? "\u2715 Cancel" : "+ Add Course"}
           </motion.button>
         </div>
       </div>
 
-      {/* ─── Section B: Manual Override ──────────────────────────────────── */}
+      {/* ─── Manual Override ── */}
       <div style={{ marginBottom: 16 }} className="print-hide">
         <GlassCard style={{ padding: 0, overflow: "hidden" }}>
           <button
@@ -390,7 +724,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                   : "rotate(0deg)",
               }}
             >
-              ▾
+              \u25be
             </span>
           </button>
 
@@ -415,8 +749,6 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     Leave the name field blank to delete the particular day-slot
                     override.
                   </p>
-
-                  {/* Override list */}
                   {overrides.length > 0 && (
                     <div
                       style={{
@@ -448,7 +780,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                           <span style={{ color: "#818cf8", fontWeight: 700 }}>
                             {ov.slot}
                           </span>
-                          <span style={{ color: "#6B7590" }}>→</span>
+                          <span style={{ color: "#6B7590" }}>\u2192</span>
                           <span style={{ color: "#F0F4FF", flex: 1 }}>
                             {ov.name || (
                               <em style={{ color: "#4A5270" }}>deleted</em>
@@ -471,14 +803,12 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                               opacity: 0.7,
                             }}
                           >
-                            ×
+                            \u00d7
                           </motion.button>
                         </div>
                       ))}
                     </div>
                   )}
-
-                  {/* Override form */}
                   <AnimatePresence>
                     {showOverrideForm && (
                       <motion.div
@@ -532,7 +862,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                           <input
                             className="glass-input"
                             style={{ flex: "1 1 140px", fontSize: 12 }}
-                            placeholder="Time e.g. 10:00–11:00"
+                            placeholder="Time e.g. 10:00\u201311:00"
                             value={ovTime}
                             onChange={(e) => setOvTime(e.target.value)}
                           />
@@ -548,7 +878,6 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       </motion.div>
                     )}
                   </AnimatePresence>
-
                   <div style={{ display: "flex", gap: 10 }}>
                     <motion.button
                       data-ocid="timetable.override.primary_button"
@@ -557,7 +886,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       style={{ fontSize: 12, padding: "8px 16px" }}
                       onClick={() => setShowOverrideForm(!showOverrideForm)}
                     >
-                      {showOverrideForm ? "✕ Cancel" : "+ Add Override"}
+                      {showOverrideForm ? "\u2715 Cancel" : "+ Add Override"}
                     </motion.button>
                     <motion.button
                       whileTap={{ scale: 0.97 }}
@@ -579,7 +908,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
         </GlassCard>
       </div>
 
-      {/* ─── Section C: Save / Load ──────────────────────────────────────── */}
+      {/* ─── Save / Load ── */}
       <div style={{ marginBottom: 16 }} className="print-hide">
         <GlassCard style={{ padding: 0, overflow: "hidden" }}>
           <button
@@ -621,10 +950,9 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                 transform: showSaveLoad ? "rotate(180deg)" : "rotate(0deg)",
               }}
             >
-              ▾
+              \u25be
             </span>
           </button>
-
           <AnimatePresence initial={false}>
             {showSaveLoad && (
               <motion.div
@@ -643,8 +971,8 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       marginBottom: 16,
                     }}
                   >
-                    ⚠️ Warning: Making modifications to the downloaded file might
-                    lead to unpredictable results!
+                    \u26a0\ufe0f Warning: Making modifications to the downloaded
+                    file might lead to unpredictable results!
                   </p>
                   <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                     <motion.button
@@ -661,7 +989,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       }}
                       onClick={handleSaveData}
                     >
-                      💾 Save Data
+                      \ud83d\udcbe Save Data
                     </motion.button>
                     <motion.button
                       data-ocid="timetable.load.secondary_button"
@@ -677,7 +1005,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       }}
                       onClick={() => fileInputRef.current?.click()}
                     >
-                      📂 Load Data
+                      \ud83d\udcc2 Load Data
                     </motion.button>
                     <input
                       ref={fileInputRef}
@@ -688,8 +1016,8 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     />
                   </div>
                   <p style={{ fontSize: 11, color: "#4A5270", marginTop: 12 }}>
-                    Saved file includes all your courses and slot overrides.
-                    Load it on any device running InstiFlow.
+                    Saved file includes all your courses, entries, and slot
+                    overrides. Load it on any device running InstiFlow.
                   </p>
                 </div>
               </motion.div>
@@ -697,7 +1025,8 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
           </AnimatePresence>
         </GlassCard>
       </div>
-      {/* ─── Section A: Add Slot ─────────────────────────────────────────── */}
+
+      {/* ─── Add Slot ── */}
       <div style={{ marginBottom: 16 }} className="print-hide">
         <GlassCard style={{ padding: 0, overflow: "hidden" }}>
           <button
@@ -740,7 +1069,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                 transform: showForm ? "rotate(180deg)" : "rotate(0deg)",
               }}
             >
-              ▾
+              \u25be
             </span>
           </button>
 
@@ -809,7 +1138,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                         onClick={handlePopulate}
                         title="Auto-fill name & venue from IITM course database"
                       >
-                        ✨ Populate
+                        \u2728 Populate
                       </motion.button>
                     </div>
                     <input
@@ -828,7 +1157,9 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     >
                       {ALL_SLOTS.map((s) => (
                         <option key={s} value={s}>
-                          Slot {s} — {getSlotScheduleDesc(s)}
+                          {s === "EXTRA_6_8"
+                            ? "Extra Slot \u2014 18:00\u201320:00 (all days)"
+                            : `Slot ${s} \u2014 ${getSlotScheduleDesc(s)}`}
                         </option>
                       ))}
                     </select>
@@ -846,28 +1177,27 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     </select>
                   </div>
 
-                  {/* Populate message */}
                   {populateMsg && (
                     <div
                       style={{
                         fontSize: 11,
-                        color: populateMsg.startsWith("✓")
+                        color: populateMsg.startsWith("\u2713")
                           ? "#22d3ee"
                           : "rgba(255,122,89,0.85)",
                         marginBottom: 10,
                         padding: "4px 8px",
                         borderRadius: 6,
-                        background: populateMsg.startsWith("✓")
+                        background: populateMsg.startsWith("\u2713")
                           ? "rgba(34,211,238,0.06)"
                           : "rgba(255,122,89,0.06)",
-                        border: `1px solid ${populateMsg.startsWith("✓") ? "rgba(34,211,238,0.2)" : "rgba(255,122,89,0.2)"}`,
+                        border: `1px solid ${populateMsg.startsWith("\u2713") ? "rgba(34,211,238,0.2)" : "rgba(255,122,89,0.2)"}`,
                       }}
                     >
                       {populateMsg}
                     </div>
                   )}
 
-                  {/* Enhanced Color Picker */}
+                  {/* Color Picker */}
                   <div style={{ marginBottom: 18 }}>
                     <div
                       style={{
@@ -964,6 +1294,60 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     </div>
                   </div>
 
+                  {/* Remove individual course */}
+                  {courses.length > 0 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                        marginBottom: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <select
+                        data-ocid="timetable.select"
+                        className="glass-input"
+                        style={{ flex: "2 1 200px", fontSize: 12 }}
+                        value={removeCourseId}
+                        onChange={(e) => setRemoveCourseId(e.target.value)}
+                      >
+                        <option value="">
+                          \u2014 Select course to remove (all instances) \u2014
+                        </option>
+                        {courses.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.slot === "EXTRA_6_8"
+                              ? "Extra Slot"
+                              : `Slot ${c.slot}`}{" "}
+                            \u00b7 {c.name}
+                            {c.code ? ` (${c.code})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <motion.button
+                        data-ocid="timetable.delete_button"
+                        className="glass-btn"
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => {
+                          if (removeCourseId) {
+                            onDeleteCourse(removeCourseId);
+                            onDeleteEntriesForCourse(removeCourseId);
+                            setRemoveCourseId("");
+                          }
+                        }}
+                        style={{
+                          padding: "9px 16px",
+                          color: "rgba(255,122,89,0.85)",
+                          fontSize: 12,
+                          opacity: removeCourseId ? 1 : 0.45,
+                        }}
+                      >
+                        Remove Selected
+                      </motion.button>
+                    </div>
+                  )}
+
                   <div style={{ display: "flex", gap: 10 }}>
                     <motion.button
                       data-ocid="timetable.submit_button"
@@ -978,7 +1362,16 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       className="glass-btn"
                       whileTap={{ scale: 0.97 }}
                       onClick={() => {
-                        for (const c of courses) onDeleteCourse(c.id);
+                        if (
+                          window.confirm(
+                            "\u26a0\ufe0f Clear ALL courses from timetable? This cannot be undone.",
+                          )
+                        ) {
+                          for (const c of courses) {
+                            onDeleteCourse(c.id);
+                            onDeleteEntriesForCourse(c.id);
+                          }
+                        }
                       }}
                       style={{
                         padding: "9px 18px",
@@ -986,7 +1379,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                         fontSize: 12,
                       }}
                     >
-                      Clear Slots
+                      \u26a0\ufe0f Clear All
                     </motion.button>
                     <motion.button
                       className="glass-btn"
@@ -994,7 +1387,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       onClick={handlePopulate}
                       style={{ padding: "9px 18px", fontSize: 12 }}
                     >
-                      ✨ Populate
+                      \u2728 Populate
                     </motion.button>
                   </div>
                 </div>
@@ -1004,7 +1397,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
         </GlassCard>
       </div>
 
-      {/* ── Evening Slots (6 PM – 8 PM) ── */}
+      {/* ── Extra Slot (6PM-8PM) ── */}
       <GlassCard
         className="print-hide"
         style={{ marginBottom: 16, padding: 0, overflow: "hidden" }}
@@ -1026,10 +1419,10 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
         >
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#c4b5fd" }}>
-              ⏰ Extra Slot (6 PM – 8 PM)
+              \u23f0 Extra Slot (6 PM \u2013 8 PM)
             </div>
             <div style={{ fontSize: 11, color: "#6B7590", marginTop: 2 }}>
-              Add 6–8 PM classes to your timetable grid
+              Add 6\u20138 PM classes to your timetable grid
             </div>
           </div>
           <span
@@ -1040,19 +1433,24 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
               transition: "transform 0.2s",
             }}
           >
-            ▾
+            \u25be
           </span>
         </button>
+
         {showEveningSection && (
           <div style={{ padding: "0 18px 18px" }}>
-            {eveningSlots.length === 0 && !showEveningForm && (
+            {extraSlotEntries.length === 0 && !showEveningForm && (
               <div style={{ fontSize: 12, color: "#3D4460", marginBottom: 12 }}>
-                No evening slots added yet.
+                No extra slots added yet.
               </div>
             )}
-            {eveningSlots.map((es) => (
+
+            {/* List unique extra slot courses */}
+            {Array.from(
+              new Map(extraSlotEntries.map((e) => [e.courseId, e])).values(),
+            ).map((es) => (
               <div
-                key={es.id}
+                key={es.courseId}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -1071,9 +1469,12 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     {es.courseName} {es.courseCode ? `(${es.courseCode})` : ""}
                   </div>
                   <div style={{ fontSize: 11, color: "#8A94B0" }}>
-                    {es.startTime}–{es.endTime} ·{" "}
-                    {es.days.join(", ") || "No days"}{" "}
-                    {es.venue ? `· ${es.venue}` : ""}
+                    {es.startTime}\u2013{es.endTime} \u00b7{" "}
+                    {es.venue ? `\u00b7 ${es.venue}` : ""} &middot; Days:{" "}
+                    {extraSlotEntries
+                      .filter((e) => e.courseId === es.courseId)
+                      .map((e) => DAY_SHORTS[e.day])
+                      .join(", ")}
                   </div>
                 </div>
                 <motion.button
@@ -1084,12 +1485,16 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     fontSize: 12,
                     color: "#e05555",
                   }}
-                  onClick={() => deleteEveningSlot(es.id)}
+                  onClick={() => {
+                    onDeleteCourse(es.courseId);
+                    onDeleteEntriesForCourse(es.courseId);
+                  }}
                 >
-                  ×
+                  \u00d7
                 </motion.button>
               </div>
             ))}
+
             {!showEveningForm ? (
               <motion.button
                 data-ocid="timetable.open_modal_button"
@@ -1136,7 +1541,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                   }}
                 >
                   <span style={{ fontSize: 12, color: "#A9B0C7" }}>Days:</span>
-                  {["Mon", "Tue", "Wed", "Thu", "Fri"].map((d) => (
+                  {DAY_SHORTS.map((d, i) => (
                     <label
                       key={d}
                       style={{
@@ -1150,8 +1555,8 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     >
                       <input
                         type="checkbox"
-                        checked={evDays.includes(d)}
-                        onChange={() => toggleEvDay(d)}
+                        checked={evDays.includes(i)}
+                        onChange={() => toggleEvDay(i)}
                         style={{ accentColor: "#a78bfa" }}
                       />
                       {d}
@@ -1206,7 +1611,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     whileTap={{ scale: 0.97 }}
                     className="btn-gradient"
                     style={{ flex: 1, padding: "9px 18px", fontSize: 13 }}
-                    onClick={addEveningSlot}
+                    onClick={addEveningSlotEntries}
                   >
                     Save Slot
                   </motion.button>
@@ -1225,6 +1630,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
           </div>
         )}
       </GlassCard>
+
       {/* Timetable Grid */}
       <GlassCard
         style={
@@ -1248,8 +1654,6 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
         >
           Weekly Schedule
         </div>
-
-        {/* Mobile scroll hint */}
         <div
           className="mobile-scroll-hint print-hide"
           style={{
@@ -1268,8 +1672,6 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
           <span>Scroll horizontally to view full timetable</span>
           <span>&#8594;</span>
         </div>
-
-        {/* Print header */}
         <div
           style={{ display: "none", marginBottom: 12 }}
           className="print-only"
@@ -1282,17 +1684,17 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
               marginBottom: 2,
             }}
           >
-            InstiFlow — IITM Weekly Timetable
+            InstiFlow \u2014 IITM Weekly Timetable
           </div>
           <div style={{ fontSize: 11, color: "#555" }}>
-            Jan–May 2026 · Even Semester
+            Jan\u2013May 2026 \u00b7 Even Semester
           </div>
         </div>
 
         <div
           className="tt-grid-wrapper"
           style={{
-            minWidth: 900,
+            minWidth: 950,
             overflowX: "auto",
             WebkitOverflowScrolling: "touch",
             WebkitPrintColorAdjust: "exact",
@@ -1301,7 +1703,6 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
             fontFamily: "inherit",
           }}
         >
-          {/* IITM Official Grid Table */}
           <table
             style={{
               width: "100%",
@@ -1313,15 +1714,16 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
               <col style={{ width: 56 }} />
               {TIME_COLUMNS.map((col, ci) =>
                 ci === 6 || ci === 7 ? (
-                  <col key={col.label} style={{ width: "14%" }} />
+                  <col key={col.label} style={{ width: "13%" }} />
                 ) : (
-                  <col key={col.label} style={{ width: "9%" }} />
+                  <col key={col.label} style={{ width: "8%" }} />
                 ),
               )}
-              <col style={{ width: "11%" }} />
+              {/* Extra slot column */}
+              <col style={{ width: "10%" }} />
             </colgroup>
 
-            {/* Header Row */}
+            {/* Header */}
             <thead>
               <tr>
                 <th
@@ -1361,27 +1763,26 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                 ))}
                 <th
                   style={{
-                    background: "#0d0f1a",
+                    background: "rgba(167,139,250,0.08)",
                     border: "1px solid #1e2235",
                     padding: "8px 4px",
                     fontSize: 10,
                     fontWeight: 600,
-                    color: "rgba(180,190,255,0.8)",
+                    color: "#c4b5fd",
                     textAlign: "center",
                     letterSpacing: "0.01em",
                     lineHeight: 1.4,
                   }}
                 >
-                  ⏰ 18:00–20:00
+                  \u23f0 18:00\u201320:00
                 </th>
               </tr>
             </thead>
 
-            {/* Day Rows */}
+            {/* Day rows */}
             <tbody>
               {DAY_LABELS.map((dayLabel, dayIdx) => (
                 <tr key={dayLabel}>
-                  {/* Day label cell */}
                   <td
                     style={{
                       background: "#0d0f1a",
@@ -1392,18 +1793,16 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       fontWeight: 700,
                       color: "#5A6280",
                       letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      height: 78,
                     }}
                   >
                     {dayLabel}
                   </td>
 
-                  {/* Time slot cells */}
-                  {SLOT_GRID[dayIdx].map((cell, colIdx) => {
-                    const cellKey = `${dayLabel}-col-${colIdx}`;
+                  {TIME_COLUMNS.map((_col, colIdx) => {
+                    const cell = SLOT_GRID[dayIdx]?.[colIdx];
+                    const cellKey = `${dayLabel}-${colIdx}`;
 
-                    /* ── LUNCH ── */
+                    // ── Lunch cell ──
                     if (colIdx === 4) {
                       return (
                         <td
@@ -1413,96 +1812,191 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                             border: "1px solid #1e2235",
                             textAlign: "center",
                             verticalAlign: "middle",
-                            padding: 4,
+                            padding: "4px",
                             height: 78,
                           }}
                         >
-                          <div style={{ fontSize: 11, marginBottom: 2 }}>🍽️</div>
-                          <div
-                            style={{
-                              fontSize: 7,
-                              color: "#2D3450",
-                              fontWeight: 700,
-                              letterSpacing: "0.08em",
-                            }}
-                          >
-                            LUNCH
-                          </div>
+                          {dayIdx === 2 && (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                gap: 3,
+                              }}
+                            >
+                              <span style={{ fontSize: 14 }}>\ud83c\udf5c</span>
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  color: "rgba(180,190,255,0.25)",
+                                  fontWeight: 600,
+                                  letterSpacing: "0.1em",
+                                }}
+                              >
+                                LUNCH
+                              </span>
+                            </div>
+                          )}
                         </td>
                       );
                     }
 
-                    /* ── Split afternoon cell (tuple) ── */
-                    if (Array.isArray(cell)) {
-                      const [topSlot, bottomSlot] = cell;
-                      const topCourse = topSlot
-                        ? slotToCourse.get(topSlot)
-                        : null;
-                      const bottomCourse = bottomSlot
-                        ? slotToCourse.get(bottomSlot)
-                        : null;
+                    // ── Split cell (cols 6 & 7) ──
+                    if (colIdx === 6 || colIdx === 7) {
+                      const pair = cell as [string | null, string | null];
+                      const topSlot = pair?.[0] ?? null;
+                      const bottomSlot = pair?.[1] ?? null;
+
+                      // Top entries
+                      const topEntries = topSlot
+                        ? (entryGrid.get(`${dayIdx}__${colIdx}`) ?? []).filter(
+                            (e) => e.slot === topSlot,
+                          )
+                        : [];
+                      // Bottom entries
+                      const bottomEntries = bottomSlot
+                        ? (entryGrid.get(`${dayIdx}__${colIdx}`) ?? []).filter(
+                            (e) => e.slot === bottomSlot,
+                          )
+                        : [];
+
                       const topOverrideInfo = topSlot
                         ? (overrideLookup.get(`${dayLabel}__${topSlot}`) ??
                           null)
                         : null;
-                      const topOverride = topOverrideInfo?.name ?? null;
+                      const topFilled =
+                        topEntries.length > 0 || !!topOverrideInfo?.name;
+                      const topBg = topEntries[0]?.color ?? null;
+
                       const botOverrideInfo = bottomSlot
                         ? (overrideLookup.get(`${dayLabel}__${bottomSlot}`) ??
                           null)
                         : null;
-                      const botOverride = botOverrideInfo?.name ?? null;
+                      const botFilled =
+                        bottomEntries.length > 0 || !!botOverrideInfo?.name;
+                      const botBg = bottomEntries[0]?.color ?? null;
 
-                      const renderHalf = (
-                        slotLetter: string | null,
-                        course: Course | null | undefined,
-                        overrideName: string | null,
-                        key: string,
-                        isLab: boolean,
-                        labSlot?: string | null,
-                      ) => {
-                        const bg = course?.color ?? null;
-                        const filled = !!(course || bg || overrideName);
-                        // For empty bottom halves, show the lab slot letter instead
-                        const displaySlot =
-                          !isLab && !filled && labSlot ? labSlot : slotLetter;
-                        return (
-                          <div
-                            key={key}
-                            style={{
-                              flex: 1,
-                              background: overrideName
-                                ? "rgba(139,92,246,0.22)"
-                                : bg
-                                  ? bg
-                                  : "#13151f",
-                              borderBottom: "1px solid #1e2235",
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              padding: "2px 3px",
-                              overflow: "hidden",
-                              WebkitPrintColorAdjust: "exact",
-                              // @ts-ignore
-                              printColorAdjust: "exact",
-                            }}
-                          >
-                            {displaySlot && (
-                              <>
-                                <span
-                                  style={{
-                                    fontSize: 8,
-                                    fontWeight: 700,
-                                    color: filled
-                                      ? "rgba(0,0,0,0.6)"
-                                      : "#2A3050",
-                                    lineHeight: 1,
-                                    display: "block",
-                                  }}
-                                >
-                                  ({displaySlot})
-                                </span>
-                                {filled && (
+                      const renderHalfCell = (
+                        slotName: string | null,
+                        entries: TimetableEntry[],
+                        overrideInfo: { name: string; time?: string } | null,
+                        isFilled: boolean,
+                        bgColor: string | null,
+                        isTop: boolean,
+                      ) => (
+                        <td
+                          onClick={() => {
+                            if (!isFilled) return;
+                            if (entries.length === 1) {
+                              const e = entries[0];
+                              setDeleteCell({
+                                entryId: e.id,
+                                label: `${e.courseName} (${DAY_SHORTS[dayIdx]} ${e.startTime})`,
+                              });
+                            } else if (overrideInfo?.name && slotName) {
+                              setDeleteCell({
+                                overrideKey: `${dayLabel}__${slotName}`,
+                                label: overrideInfo.name,
+                              });
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ")
+                              e.currentTarget.click();
+                          }}
+                          style={{
+                            height: "50%",
+                            borderTop: isTop ? undefined : "1px solid #1e2235",
+                            background: overrideInfo?.name
+                              ? "rgba(139,92,246,0.22)"
+                              : (bgColor ?? "#13151f"),
+                            textAlign: "center",
+                            verticalAlign: "middle",
+                            padding: "4px 3px",
+                            cursor: isFilled ? "pointer" : "default",
+                            WebkitPrintColorAdjust: "exact",
+                            // @ts-ignore
+                            printColorAdjust: "exact",
+                          }}
+                        >
+                          {slotName && (
+                            <>
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  fontWeight: 700,
+                                  color: isFilled
+                                    ? "rgba(0,0,0,0.6)"
+                                    : "#2A3050",
+                                  lineHeight: 1,
+                                  display: "block",
+                                }}
+                              >
+                                ({slotName})
+                              </span>
+                              {isFilled &&
+                                (entries.length > 1 ? (
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: 1,
+                                    }}
+                                  >
+                                    {entries.map((entry) => (
+                                      <button
+                                        key={entry.id}
+                                        type="button"
+                                        onClick={(ev) => {
+                                          ev.stopPropagation();
+                                          setDeleteCell({
+                                            entryId: entry.id,
+                                            label: `${entry.courseName} (${DAY_SHORTS[dayIdx]} ${entry.startTime})`,
+                                          });
+                                        }}
+                                        style={{
+                                          padding: "1px 2px",
+                                          borderRadius: 3,
+                                          background: entry.color
+                                            ? `${entry.color}CC`
+                                            : "rgba(139,92,246,0.3)",
+                                          cursor: "pointer",
+                                          border: "none",
+                                          width: "100%",
+                                          fontFamily: "inherit",
+                                        }}
+                                      >
+                                        <span
+                                          style={{
+                                            fontSize: 7,
+                                            fontWeight: 800,
+                                            color: "rgba(0,0,0,0.88)",
+                                            display: "block",
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap",
+                                          }}
+                                        >
+                                          {entry.courseCode ||
+                                            entry.courseName.slice(0, 6)}
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontSize: 6,
+                                            color: "rgba(0,0,0,0.6)",
+                                            display: "block",
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap",
+                                          }}
+                                        >
+                                          {entry.courseName.slice(0, 9)}
+                                        </span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : entries[0] ? (
                                   <>
                                     <span
                                       style={{
@@ -1519,11 +2013,11 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                                         textAlign: "center",
                                       }}
                                     >
-                                      {overrideName ||
-                                        course?.code ||
-                                        course?.name.slice(0, 6)}
+                                      {overrideInfo?.name ||
+                                        entries[0].courseCode ||
+                                        entries[0].courseName?.slice(0, 6)}
                                     </span>
-                                    {course?.name && (
+                                    {entries[0].courseName && (
                                       <span
                                         style={{
                                           fontSize: 7,
@@ -1536,10 +2030,12 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                                           textAlign: "center",
                                         }}
                                       >
-                                        {course.name.slice(0, 10)}
+                                        {entries[0].courseName.length > 10
+                                          ? `${entries[0].courseName.slice(0, 9)}\u2026`
+                                          : entries[0].courseName}
                                       </span>
                                     )}
-                                    {course?.venue && (
+                                    {entries[0].venue && (
                                       <span
                                         style={{
                                           fontSize: 6,
@@ -1552,16 +2048,61 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                                           textAlign: "center",
                                         }}
                                       >
-                                        {course.venue}
+                                        {entries[0].venue}
                                       </span>
                                     )}
+                                    <span
+                                      className="print-hide"
+                                      style={{
+                                        fontSize: 7,
+                                        color: "rgba(0,0,0,0.35)",
+                                        marginTop: 1,
+                                      }}
+                                    >
+                                      tap to remove
+                                    </span>
                                   </>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        );
-                      };
+                                ) : overrideInfo?.name ? (
+                                  <>
+                                    <span
+                                      style={{
+                                        fontSize: 9,
+                                        fontWeight: 800,
+                                        color: "rgba(0,0,0,0.85)",
+                                        lineHeight: 1.1,
+                                        marginTop: 1,
+                                        display: "block",
+                                      }}
+                                    >
+                                      {overrideInfo.name}
+                                    </span>
+                                    {overrideInfo.time && (
+                                      <span
+                                        style={{
+                                          fontSize: 6,
+                                          color: "rgba(0,0,0,0.4)",
+                                          lineHeight: 1,
+                                        }}
+                                      >
+                                        \u23f0 {overrideInfo.time}
+                                      </span>
+                                    )}
+                                    <span
+                                      className="print-hide"
+                                      style={{
+                                        fontSize: 7,
+                                        color: "rgba(0,0,0,0.35)",
+                                        marginTop: 1,
+                                      }}
+                                    >
+                                      tap to remove
+                                    </span>
+                                  </>
+                                ) : null)}
+                            </>
+                          )}
+                        </td>
+                      );
 
                       return (
                         <td
@@ -1573,46 +2114,53 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                             verticalAlign: "stretch",
                           }}
                         >
-                          <div
+                          <table
                             style={{
-                              display: "flex",
-                              flexDirection: "column",
+                              width: "100%",
                               height: "100%",
+                              borderCollapse: "collapse",
                             }}
                           >
-                            {renderHalf(
-                              topSlot,
-                              topCourse,
-                              topOverride,
-                              `${cellKey}-top`,
-                              true,
-                            )}
-                            {renderHalf(
-                              bottomSlot,
-                              bottomCourse,
-                              botOverride,
-                              `${cellKey}-bot`,
-                              false,
-                              topSlot,
-                            )}
-                          </div>
+                            <tbody>
+                              <tr>
+                                {renderHalfCell(
+                                  topSlot,
+                                  topEntries,
+                                  topOverrideInfo,
+                                  topFilled,
+                                  topBg,
+                                  true,
+                                )}
+                              </tr>
+                              <tr>
+                                {renderHalfCell(
+                                  bottomSlot,
+                                  bottomEntries,
+                                  botOverrideInfo,
+                                  botFilled,
+                                  botBg,
+                                  false,
+                                )}
+                              </tr>
+                            </tbody>
+                          </table>
                         </td>
                       );
                     }
 
-                    /* ── Normal cell ── */
+                    // ── Normal cell ──
                     const slotLetter = cell as string | null;
-                    const course = slotLetter
-                      ? slotToCourse.get(slotLetter)
-                      : null;
-                    const overrideInfo = slotLetter
-                      ? (overrideLookup.get(`${dayLabel}__${slotLetter}`) ??
-                        null)
-                      : null;
-                    const overrideName = overrideInfo?.name ?? null;
-                    const overrideTime = overrideInfo?.time ?? null;
-                    const bg = course?.color ?? null;
-                    const filled = !!(bg || overrideName);
+                    const cellEntries = slotLetter
+                      ? (entryGrid.get(`${dayIdx}__${colIdx}`) ?? []).filter(
+                          (e) => e.slot === slotLetter,
+                        )
+                      : [];
+                    const { filled, bg, content } = renderCellEntries(
+                      cellEntries,
+                      slotLetter,
+                      dayLabel,
+                      colIdx,
+                    );
 
                     return (
                       <motion.td
@@ -1624,24 +2172,16 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                           duration: 0.25,
                         }}
                         onClick={() => {
-                          if (!filled) return;
-                          if (course) {
-                            setDeleteCell({
-                              courseId: course.id,
-                              label: course.name,
-                            });
-                          } else if (overrideName && slotLetter) {
-                            setDeleteCell({
-                              overrideKey: `${dayLabel}__${slotLetter}`,
-                              label: overrideName,
-                            });
-                          }
+                          if (!filled || cellEntries.length !== 1) return;
+                          const entry = cellEntries[0];
+                          setDeleteCell({
+                            entryId: entry.id,
+                            label: `${entry.courseName} (${DAY_SHORTS[dayIdx]} ${entry.startTime})`,
+                          });
                         }}
                         style={{
                           border: "1px solid #1e2235",
-                          background: overrideName
-                            ? "rgba(139,92,246,0.22)"
-                            : (bg ?? "#13151f"),
+                          background: bg,
                           textAlign: "center",
                           verticalAlign: "middle",
                           padding: "4px 3px",
@@ -1653,124 +2193,17 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                           position: "relative",
                         }}
                       >
-                        {slotLetter && (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              gap: 1,
-                              height: "100%",
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 9,
-                                fontWeight: 600,
-                                color: filled ? "rgba(0,0,0,0.55)" : "#252840",
-                                lineHeight: 1,
-                              }}
-                            >
-                              ({slotLetter})
-                            </span>
-                            {filled && (
-                              <>
-                                <span
-                                  style={{
-                                    fontSize: 11,
-                                    fontWeight: 800,
-                                    color: "rgba(0,0,0,0.88)",
-                                    lineHeight: 1.15,
-                                    marginTop: 2,
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                    maxWidth: "95%",
-                                    display: "block",
-                                  }}
-                                >
-                                  {overrideName || course?.code || ""}
-                                </span>
-                                {course?.name && (
-                                  <span
-                                    style={{
-                                      fontSize: 8,
-                                      color: "rgba(0,0,0,0.6)",
-                                      lineHeight: 1.2,
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                      maxWidth: "95%",
-                                      display: "block",
-                                    }}
-                                  >
-                                    {course.name.length > 14
-                                      ? `${course.name.slice(0, 13)}…`
-                                      : course.name}
-                                  </span>
-                                )}
-                                {course?.venue && (
-                                  <span
-                                    style={{
-                                      fontSize: 8,
-                                      color: "rgba(0,0,0,0.5)",
-                                      lineHeight: 1.1,
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                      maxWidth: "95%",
-                                      display: "block",
-                                    }}
-                                  >
-                                    {course.venue}
-                                  </span>
-                                )}
-                                {overrideTime && (
-                                  <span
-                                    style={{
-                                      fontSize: 7,
-                                      color: "rgba(0,0,0,0.45)",
-                                      lineHeight: 1.1,
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                      maxWidth: "95%",
-                                      display: "block",
-                                    }}
-                                  >
-                                    ⏰ {overrideTime}
-                                  </span>
-                                )}
-                                {filled && (
-                                  <span
-                                    style={{
-                                      fontSize: 7,
-                                      color: "rgba(0,0,0,0.35)",
-                                      marginTop: 1,
-                                    }}
-                                  >
-                                    tap to remove
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        )}
+                        {content}
                       </motion.td>
                     );
                   })}
-                  {/* Evening slot column */}
+
+                  {/* Extra slot column */}
                   {(() => {
-                    const dayShort = ["Mon", "Tue", "Wed", "Thu", "Fri"][
-                      dayIdx
-                    ];
-                    const active = eveningSlots.filter((es) =>
-                      es.days.includes(dayShort),
-                    );
+                    const active = extraByDay.get(dayIdx) ?? [];
                     return (
                       <td
-                        key={`evening-${dayLabel}`}
+                        key={`extra-${dayLabel}`}
                         style={{
                           background:
                             active.length > 0
@@ -1792,15 +2225,27 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                               gap: 2,
                             }}
                           >
-                            {active.map((es) => (
-                              <div
-                                key={es.id}
+                            {active.map((entry) => (
+                              <button
+                                key={entry.id}
+                                type="button"
+                                onClick={() =>
+                                  setDeleteCell({
+                                    entryId: entry.id,
+                                    label: `${entry.courseName} (${DAY_SHORTS[dayIdx]} extra)`,
+                                  })
+                                }
                                 style={{
+                                  padding: "2px 4px",
+                                  borderRadius: 4,
+                                  background: "rgba(167,139,250,0.25)",
+                                  cursor: "pointer",
+                                  border: "none",
+                                  width: "100%",
+                                  fontFamily: "inherit",
                                   display: "flex",
                                   flexDirection: "column",
                                   alignItems: "center",
-                                  gap: 1,
-                                  width: "100%",
                                 }}
                               >
                                 <span
@@ -1815,7 +2260,8 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                                     display: "block",
                                   }}
                                 >
-                                  {es.courseCode || es.courseName.slice(0, 8)}
+                                  {entry.courseCode ||
+                                    entry.courseName.slice(0, 8)}
                                 </span>
                                 <span
                                   style={{
@@ -1828,23 +2274,19 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                                     display: "block",
                                   }}
                                 >
-                                  {es.courseName.length > 12
-                                    ? `${es.courseName.slice(0, 11)}…`
-                                    : es.courseName}
+                                  {entry.courseName.length > 12
+                                    ? `${entry.courseName.slice(0, 11)}\u2026`
+                                    : entry.courseName}
                                 </span>
-                                {es.venue && (
+                                {entry.venue && (
                                   <span
                                     style={{
                                       fontSize: 6,
                                       color: "rgba(196,181,253,0.5)",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                      maxWidth: "95%",
                                       display: "block",
                                     }}
                                   >
-                                    {es.venue}
+                                    {entry.venue}
                                   </span>
                                 )}
                                 <span
@@ -1853,9 +2295,18 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                                     color: "rgba(167,139,250,0.6)",
                                   }}
                                 >
-                                  {es.startTime}–{es.endTime}
+                                  {entry.startTime}\u2013{entry.endTime}
                                 </span>
-                              </div>
+                                <span
+                                  className="print-hide"
+                                  style={{
+                                    fontSize: 6,
+                                    color: "rgba(167,139,250,0.4)",
+                                  }}
+                                >
+                                  tap to remove
+                                </span>
+                              </button>
                             ))}
                           </div>
                         )}
@@ -1899,20 +2350,19 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       borderRadius: 3,
                       background: c.color ?? getSlotColor(c.slot),
                       border: `1px solid ${c.color ?? getSlotColor(c.slot)}`,
-                      WebkitPrintColorAdjust: "exact",
-                      // @ts-ignore
+                      WebkitPrintColorAdjust: "exact", // @ts-ignore
                       printColorAdjust: "exact",
                       flexShrink: 0,
                     }}
                   />
                   <span style={{ fontWeight: 700, color: "#B0BAD0" }}>
-                    Slot {c.slot}
+                    {c.slot === "EXTRA_6_8" ? "Extra" : `Slot ${c.slot}`}
                   </span>
-                  <span style={{ color: "#4A5270" }}>—</span>
+                  <span style={{ color: "#4A5270" }}>\u2014</span>
                   <span style={{ color: "#8B95B0" }}>{c.code || c.name}</span>
                   {c.venue && (
                     <span style={{ color: "#4A5270", fontSize: 10 }}>
-                      · {c.venue}
+                      \u00b7 {c.venue}
                     </span>
                   )}
                 </div>
@@ -2011,17 +2461,19 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                       fontWeight: 500,
                     }}
                   >
-                    Slot {c.slot}
+                    {c.slot === "EXTRA_6_8"
+                      ? "Extra Slot (18:00\u201320:00)"
+                      : `Slot ${c.slot}`}
                     {c.venue && (
                       <span style={{ color: "#6B7590", fontWeight: 400 }}>
                         {" "}
-                        &middot; {c.venue}
+                        \u00b7 {c.venue}
                       </span>
                     )}
                     {c.hoursPerWeek && (
                       <span style={{ fontSize: 10, color: "#4A5270" }}>
                         {" "}
-                        &middot; {c.hoursPerWeek} hrs/wk
+                        \u00b7 {c.hoursPerWeek} hrs/wk
                       </span>
                     )}
                   </div>
@@ -2029,7 +2481,10 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                 <motion.button
                   data-ocid={`timetable.delete_button.${idx + 1}`}
                   whileTap={{ scale: 0.9 }}
-                  onClick={() => onDeleteCourse(c.id)}
+                  onClick={() => {
+                    onDeleteCourse(c.id);
+                    onDeleteEntriesForCourse(c.id);
+                  }}
                   style={{
                     background: "none",
                     border: "none",
@@ -2042,7 +2497,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     opacity: 0.7,
                   }}
                 >
-                  ×
+                  \u00d7
                 </motion.button>
               </motion.div>
             ))}
@@ -2050,7 +2505,7 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
         )}
       </GlassCard>
 
-      {/* ── Delete cell confirmation modal ── */}
+      {/* Delete cell confirmation modal */}
       <AnimatePresence>
         {deleteCell && (
           <motion.div
@@ -2085,7 +2540,9 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                 textAlign: "center",
               }}
             >
-              <div style={{ fontSize: 24, marginBottom: 12 }}>🗑️</div>
+              <div style={{ fontSize: 24, marginBottom: 12 }}>
+                \ud83d\uddd1\ufe0f
+              </div>
               <div
                 style={{
                   fontSize: 15,
@@ -2121,25 +2578,29 @@ export function Timetable({ courses, onAddCourse, onDeleteCourse }: Props) {
                     background: "linear-gradient(135deg,#e05555,#c04040)",
                   }}
                   onClick={() => {
-                    if (deleteCell.courseId) {
+                    if (deleteCell.entryId) {
+                      // Delete ONLY this specific entry instance (the critical fix)
+                      onDeleteTimetableEntry(deleteCell.entryId);
+                    } else if (deleteCell.courseId) {
+                      // Legacy: full course delete (from course cards)
                       onDeleteCourse(deleteCell.courseId);
+                      onDeleteEntriesForCourse(deleteCell.courseId);
                     } else if (deleteCell.overrideKey) {
-                      // overrideKey is "DAYSHORT__SLOT", find and remove matching override
-                      const [dayShort, slot] =
+                      const [dayShort, ovSlotKey] =
                         deleteCell.overrideKey.split("__");
                       const fullDay = DAYS.find(
                         (d) => d.slice(0, 3).toUpperCase() === dayShort,
                       );
                       saveOverrides(
                         overrides.filter(
-                          (o) => !(o.day === fullDay && o.slot === slot),
+                          (o) => !(o.day === fullDay && o.slot === ovSlotKey),
                         ),
                       );
                     }
                     setDeleteCell(null);
                   }}
                 >
-                  Remove
+                  Remove This Instance
                 </motion.button>
               </div>
             </motion.div>

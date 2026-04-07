@@ -8,3 +8,13 @@ declare module "@splinetool/react-spline" {
   }
   export default function Spline(props: SplineProps): JSX.Element;
 }
+
+// Spline web component element declaration
+declare namespace JSX {
+  interface IntrinsicElements {
+    "spline-viewer": React.DetailedHTMLProps<
+      React.HTMLAttributes<HTMLElement> & { url?: string },
+      HTMLElement
+    >;
+  }
+}

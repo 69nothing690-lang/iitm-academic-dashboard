@@ -8,6 +8,23 @@ export interface Course {
   hoursPerWeek?: number;
 }
 
+// Each cell in the timetable grid is a unique TimetableEntry.
+// This allows removing a Monday 9AM class without affecting the same
+// course on other days.
+export interface TimetableEntry {
+  id: string; // unique per cell instance
+  courseId: string; // links back to Course for attendance/exams
+  courseName: string;
+  courseCode: string;
+  slot: string; // e.g. "A", "EXTRA_6_8"
+  day: number; // 0=Mon … 4=Fri
+  colIndex: number; // TIME_COLUMNS index (or 9 for extra slot)
+  startTime: string;
+  endTime: string;
+  venue?: string;
+  color?: string;
+}
+
 export interface AttendanceRecord {
   id: string;
   courseId: string;

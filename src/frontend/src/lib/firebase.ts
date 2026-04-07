@@ -1,7 +1,6 @@
-// Firebase is loaded from CDN at runtime to avoid npm build-time dependency.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const cdnImport = (url: string): Promise<any> =>
-  new Function("u", "return import(u)")(url);
+import { type FirebaseApp, getApps, initializeApp } from "firebase/app";
+import { type Auth, GoogleAuthProvider, getAuth } from "firebase/auth";
+import { type Firestore, getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyACeYwNljzgrk8WAywxKSHoj_juuk2rPbg",
@@ -13,71 +12,46 @@ const firebaseConfig = {
   measurementId: "G-5MWJ8TFFER",
 };
 
-const CDN = "https://www.gstatic.com/firebasejs/10.12.0";
-
-let _app: unknown = null;
-let _auth: unknown = null;
-let _db: unknown = null;
-let _googleProvider: unknown = null;
-
-export async function getFirebaseApp() {
-  if (_app) return _app;
-  try {
-    const { initializeApp } = await cdnImport(`${CDN}/firebase-app.js`);
-    _app = initializeApp(firebaseConfig);
-  } catch {
-    console.warn("Firebase app init failed");
-  }
-  return _app;
+function getApp(): FirebaseApp {
+  if (getApps().length > 0) return getApps()[0];
+  return initializeApp(firebaseConfig);
 }
 
-export async function getFirebaseAuth() {
-  if (_auth) return _auth;
-  try {
-    const app = await getFirebaseApp();
-    if (!app) return null;
-    const { getAuth } = await cdnImport(`${CDN}/firebase-auth.js`);
-    _auth = getAuth(app);
-  } catch {
-    console.warn("Firebase auth init failed");
+let _auth: Auth | null = null;
+let _db: Firestore | null = null;
+let _provider: GoogleAuthProvider | null = null;
+
+export function firebaseAuth(): Auth {
+  if (!_auth) {
+    _auth = getAuth(getApp());
   }
   return _auth;
 }
 
-export async function getGoogleProvider() {
-  if (_googleProvider) return _googleProvider;
-  try {
-    const { GoogleAuthProvider } = await cdnImport(`${CDN}/firebase-auth.js`);
-    _googleProvider = new GoogleAuthProvider();
-  } catch {
-    console.warn("Firebase GoogleAuthProvider init failed");
-  }
-  return _googleProvider;
-}
-
-export async function getFirestoreDb() {
-  if (_db) return _db;
-  try {
-    const app = await getFirebaseApp();
-    if (!app) return null;
-    const { getFirestore } = await cdnImport(`${CDN}/firebase-firestore.js`);
-    _db = getFirestore(app);
-  } catch {
-    console.warn("Firestore init failed");
+export function firestoreDb(): Firestore {
+  if (!_db) {
+    _db = getFirestore(getApp());
   }
   return _db;
 }
 
-export let auth: unknown = null;
-export let googleProvider: unknown = null;
-export let db: unknown = null;
+export function googleProvider(): GoogleAuthProvider {
+  if (!_provider) {
+    _provider = new GoogleAuthProvider();
+  }
+  return _provider;
+}
 
-getFirebaseAuth().then((a) => {
-  auth = a;
-});
-getGoogleProvider().then((p) => {
-  googleProvider = p;
-});
-getFirestoreDb().then((d) => {
-  db = d;
-});
+// Legacy async getters (kept for compatibility)
+export async function getFirebaseAuth(): Promise<Auth> {
+  return firebaseAuth();
+}
+export async function getFirestoreDb(): Promise<Firestore> {
+  return firestoreDb();
+}
+export async function getGoogleProvider(): Promise<GoogleAuthProvider> {
+  return googleProvider();
+}
+export async function getFirebaseApp(): Promise<FirebaseApp> {
+  return getApp();
+}

@@ -353,6 +353,8 @@ input[type="number"].glass-input {
 
 /* ─── Landing Page ────────────────────────────────────────────────────────── */
 .landing-root {
+  min-height: 100vh;
+  overflow-x: hidden;
   background: #06080f;
   color: #f0f4ff;
   font-family: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
@@ -735,6 +737,17 @@ spline-viewer #logo {
   line-height: 1.65;
   color: rgba(169, 184, 208, 0.65);
 }
+.landing-features-scroll-hint {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: rgba(167, 139, 250, 0.7);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
 
 /* Final CTA section */
 .landing-final-cta {
@@ -803,87 +816,133 @@ spline-viewer #logo {
 }
 
 /* ─── Print Styles ───────────────────────────────────────────────────────── */
+@page {
+  size: A4 landscape;
+  margin: 8mm 6mm;
+}
+
 @media print {
-  .glass-sidebar {
+  /* Show print-only elements */
+  .print-only {
+    display: block !important;
+  }
+
+  /* Hide UI chrome */
+  .glass-sidebar,
+  .print-hide,
+  nav,
+  .landing-nav {
     display: none !important;
   }
+
+  /* Reset body for clean white print */
   body {
     background: #fff !important;
     color: #1a1a2e !important;
+    font-size: 10pt !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
   }
+
+  /* Remove main padding / margin */
+  main,
+  #root,
+  .app-main {
+    overflow: visible !important;
+    margin-left: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Timetable page wrapper — full width */
   .glass-card {
     background: #f8f9ff !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     border: 1px solid #d0d4e8 !important;
     box-shadow: none !important;
-  }
-  .print-hide {
-    display: none !important;
-  }
-  main {
-    overflow: visible !important;
-    margin-left: 0 !important;
-    padding: 0 !important;
+    page-break-inside: avoid;
   }
 
-  /* ─── Force color printing for timetable grid ─── */
+  /* ─── Grid wrapper: remove scroll clipping ─── */
   .tt-grid-wrapper {
+    overflow: visible !important;
+    min-width: 0 !important;
+    width: 100% !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color-adjust: exact !important;
+    page-break-inside: avoid;
   }
 
+  /* Full-width table */
+  .tt-grid-wrapper table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
+    font-size: 7.5pt !important;
+  }
+
+  /* Cell base */
   .tt-cell {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color-adjust: exact !important;
-    border-width: 1.5px !important;
-    border-style: solid !important;
+    border: 1px solid #1e2235 !important;
+    height: auto !important;
+    min-height: 48pt !important;
+    padding: 2pt 3pt !important;
+    font-size: 7pt !important;
   }
 
   .tt-cell-empty {
-    background: #f0f0f5 !important;
-    border-color: #ccc !important;
+    background: #0d0f1a !important;
+    border-color: #1e2235 !important;
   }
 
   .tt-time-header {
-    color: #444 !important;
+    color: rgba(180, 190, 255, 0.8) !important;
     font-weight: 700 !important;
-    font-size: 8pt !important;
+    font-size: 7pt !important;
+    background: #0d0f1a !important;
   }
 
   .tt-day-label {
-    color: #333 !important;
+    color: #5a6280 !important;
     font-weight: 800 !important;
-    font-size: 9pt !important;
+    font-size: 8pt !important;
+    background: #0d0f1a !important;
   }
 
   .tt-slot-letter {
-    color: rgba(0, 0, 0, 0.75) !important;
+    color: rgba(180, 190, 255, 0.7) !important;
     font-weight: 900 !important;
+    font-size: 6pt !important;
   }
 
   .tt-course-label {
-    color: rgba(0, 0, 0, 0.65) !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+    font-size: 6.5pt !important;
+  }
+
+  .tt-lunch-cell {
+    background: #0b0d18 !important;
+    border-color: #1e2235 !important;
+    color: #2d3450 !important;
   }
 
   .tt-legend {
-    margin-top: 12pt !important;
+    margin-top: 8pt !important;
     border-top: 1px solid #ccc !important;
-    padding-top: 8pt !important;
+    padding-top: 6pt !important;
   }
 
   .tt-legend-dot {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color-adjust: exact !important;
-  }
-
-  .tt-lunch-cell {
-    background: #f5f5f5 !important;
-    border-color: #ddd !important;
-    color: #888 !important;
   }
 }
 
@@ -963,4 +1022,40 @@ spline-viewer [id*="logo"] {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
+
+  /* Landing page: features horizontal scroll on mobile */
+  .landing-features-grid {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    gap: 14px;
+    padding-bottom: 16px;
+    padding-right: 4px;
+  }
+  .landing-feature-card {
+    min-width: 240px;
+    max-width: 240px;
+    flex-shrink: 0;
+    scroll-snap-align: start;
+  }
+  .landing-features-scroll-hint {
+    display: flex !important;
+  }
+
+  /* Landing page: hero fullscreen reliable on mobile */
+  .landing-hero-fullscreen {
+    min-height: 100svh;
+  }
+
+  /* Calendar: stack layout on mobile, detail panel full width */
+  .calendar-layout-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ─── Hide scrollbar utility ──────────────────────────────────────────────── */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
 }
