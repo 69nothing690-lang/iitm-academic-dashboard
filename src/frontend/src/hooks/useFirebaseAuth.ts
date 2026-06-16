@@ -83,6 +83,7 @@ export function useFirebaseAuth() {
       // ignore
     }
     localStorage.removeItem("instiflow_user");
+    localStorage.removeItem("instiflow_current_uid");
     (window as { __instiflow_uid?: string }).__instiflow_uid = undefined;
     setUser(null);
   };

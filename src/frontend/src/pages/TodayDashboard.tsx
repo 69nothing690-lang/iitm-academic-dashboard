@@ -13,8 +13,11 @@ import type {
 import { calcAttendance } from "../utils/attendance";
 import { getHolidaysForSem, isHoliday } from "../utils/holidays";
 import { getSemCalendar, isExamPeriod } from "../utils/semester";
-import { getClassesOnDayFromEntries } from "../utils/slots";
-import { getClassesOnDay } from "../utils/slots";
+import {
+  calcTotalClassHours,
+  getClassesOnDay,
+  getClassesOnDayFromEntries,
+} from "../utils/slots";
 
 function StatCard({
   stat,
@@ -89,10 +92,14 @@ export function TodayDashboard({
       ? getClassesOnDayFromEntries(dayOfWeek, timetableEntries)
       : getClassesOnDay(dayOfWeek, courses);
 
-  // Unique course count from entries (includes EXTRA_6_8), fallback to courses.length
+  // Unique course count: same courseCode across multiple slots counts as ONE course
   const uniqueCourseCount =
     timetableEntries.length > 0
-      ? new Set(timetableEntries.map((e) => e.courseId)).size
+      ? new Set(
+          timetableEntries
+            .filter((e) => e.slot !== "LUNCH") // exclude manual lunch overrides from count
+            .map((e) => e.courseCode || e.courseId),
+        ).size
       : courses.length;
 
   const upcomingTasks = tasks
@@ -228,6 +235,44 @@ export function TodayDashboard({
             <StatCard stat={stat} delay={0.08 + i * 0.08} />
           </div>
         ))}
+        {/* Total hours card */}
+        {todaysClasses.length > 0 && (
+          <div
+            style={{
+              minWidth: 140,
+              flex: "0 0 auto",
+              scrollSnapAlign: "start",
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                delay: 0.4,
+                duration: 0.4,
+                ease: [0.25, 0.46, 0.45, 0.94],
+              }}
+            >
+              <GlassCard hover>
+                <div style={{ fontSize: 22, marginBottom: 8 }}>⏱️</div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 800,
+                    color: "#34d399",
+                    letterSpacing: "-0.5px",
+                    textShadow: "0 0 20px #34d39980, 0 0 40px #34d39940",
+                  }}
+                >
+                  {calcTotalClassHours(todaysClasses).formatted}
+                </div>
+                <div style={{ fontSize: 12, color: "#6B7590", marginTop: 2 }}>
+                  Class Hours Today
+                </div>
+              </GlassCard>
+            </motion.div>
+          </div>
+        )}
       </div>
 
       {/* Smart Alert Banner */}
@@ -255,31 +300,56 @@ export function TodayDashboard({
         </motion.div>
       )}
 
-      {/* Classes + Tasks */}
+      {/* Today's Classes Card — full class list with total hours */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.36, duration: 0.4 }}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16,
-          marginBottom: 16,
-        }}
+        transition={{ delay: 0.3, duration: 0.4 }}
+        style={{ marginBottom: 16 }}
+        data-ocid="today.classes_section"
       >
         <GlassCard>
           <div
             style={{
-              fontSize: 10,
-              color: "#3D4460",
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              fontWeight: 700,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
               marginBottom: 14,
             }}
           >
-            Today&apos;s Classes
+            <div
+              style={{
+                fontSize: 10,
+                color: "#3D4460",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                fontWeight: 700,
+              }}
+            >
+              Today&apos;s Classes
+            </div>
+            {todaysClasses.length > 0 &&
+              (() => {
+                const { formatted } = calcTotalClassHours(todaysClasses);
+                return (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "#06b6d4",
+                      fontWeight: 700,
+                      background: "rgba(6,182,212,0.08)",
+                      padding: "3px 10px",
+                      borderRadius: 8,
+                      border: "1px solid rgba(6,182,212,0.2)",
+                    }}
+                  >
+                    {todaysClasses.length} class
+                    {todaysClasses.length !== 1 ? "es" : ""} · {formatted}
+                  </div>
+                );
+              })()}
           </div>
+
           {todayHoliday ? (
             <div
               style={{
@@ -297,53 +367,139 @@ export function TodayDashboard({
               No classes on Sunday
             </div>
           ) : todaysClasses.length === 0 ? (
-            <div style={{ color: "#3D4460", fontSize: 14 }}>
-              No classes today
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 8,
+                padding: "16px 0",
+              }}
+              data-ocid="today.empty_state"
+            >
+              <span style={{ fontSize: 28 }}>📅</span>
+              <div style={{ color: "#3D4460", fontSize: 14, fontWeight: 600 }}>
+                No classes today
+              </div>
+              <div style={{ color: "#2A3050", fontSize: 12 }}>
+                Enjoy your free day!
+              </div>
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-              {todaysClasses.map((c) => (
-                <motion.div
-                  key={c.id + c.startTime}
-                  whileHover={{ x: 4 }}
-                  style={{ display: "flex", alignItems: "center", gap: 10 }}
-                >
-                  <div
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {todaysClasses.map((c) => {
+                // Determine if this class has already finished
+                const nowMinutes =
+                  new Date().getHours() * 60 + new Date().getMinutes();
+                const parseTime = (t: string) => {
+                  const parts = t.split(":").map(Number);
+                  return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);
+                };
+                const endMinutes = c.endTime ? parseTime(c.endTime) : null;
+                const isCompleted =
+                  endMinutes !== null && endMinutes < nowMinutes;
+
+                return (
+                  <motion.div
+                    key={`${c.id}-${c.startTime}`}
+                    whileHover={{ x: isCompleted ? 0 : 4 }}
                     style={{
-                      width: 3,
-                      height: 38,
-                      borderRadius: 4,
-                      background: c.color,
-                      flexShrink: 0,
-                      boxShadow: `0 0 8px ${c.color}80`,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      position: "relative",
+                      borderRadius: 10,
+                      overflow: "hidden",
                     }}
-                  />
-                  <div>
+                    data-ocid="today.class_item"
+                  >
+                    {/* Left color indicator bar */}
                     <div
                       style={{
-                        fontSize: 14,
-                        fontWeight: 600,
-                        color: "#F0F4FF",
+                        width: 4,
+                        height: 44,
+                        borderRadius: 4,
+                        background: c.color,
+                        flexShrink: 0,
+                        boxShadow: `0 0 8px ${c.color}80`,
+                      }}
+                    />
+                    {/* Text content */}
+                    <div
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        opacity: 1,
                       }}
                     >
-                      {c.name}
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: "#F0F4FF",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {c.name}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#6B7590" }}>
+                        Slot {c.slot} · {c.startTime}–{c.endTime}
+                        {c.venue && (
+                          <span style={{ color: "#505870" }}> · {c.venue}</span>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 12, color: "#6B7590" }}>
-                      {c.startTime}–{c.endTime} &middot; Slot {c.slot}
-                      {c.venue && (
-                        <span style={{ color: "#505870" }}>
-                          {" "}
-                          &middot; {c.venue}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
+                    {/* Badge / time chip */}
+                    {isCompleted ? (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#22c55e",
+                          background: "rgba(34,197,94,0.15)",
+                          border: "1px solid rgba(34,197,94,0.25)",
+                          padding: "2px 8px",
+                          borderRadius: 9999,
+                          letterSpacing: "0.06em",
+                          flexShrink: 0,
+                        }}
+                      >
+                        COMPLETED
+                      </span>
+                    ) : (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#4A5270",
+                          fontWeight: 600,
+                          background: "rgba(99,102,241,0.08)",
+                          padding: "2px 8px",
+                          borderRadius: 6,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {c.startTime}
+                      </div>
+                    )}
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </GlassCard>
+      </motion.div>
 
+      {/* Classes + Tasks */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.36, duration: 0.4 }}
+        style={{
+          marginBottom: 16,
+        }}
+      >
         <GlassCard>
           <div
             style={{

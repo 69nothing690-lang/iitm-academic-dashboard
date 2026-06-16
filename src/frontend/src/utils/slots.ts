@@ -27,17 +27,71 @@ export const EXTRA_SLOT_TIME: TimeColumn = {
   end: "20:00",
 };
 
-// ─── Slot Grid ───────────────────────────────────────────────────────────────────────────────
-// Cols 6 and 7 use [top, bottom] tuples for split cells
-export const SLOT_GRID: (string | null | [string | null, string | null])[][] = [
-  ["A", "B", "C", "D", null, "G", ["P", "H"], ["P", "M"], "J"], // Mon
-  ["B", "C", "D", "E", null, "A", ["Q", "M"], ["Q", "H"], "F"], // Tue
-  ["C", "D", "E", "F", null, "B", ["R", "J"], ["R", "K"], "G"], // Wed
-  ["E", "F", "G", "A", null, "D", ["S", "L"], ["S", "J"], "H"], // Thu
-  ["F", "G", "A", "B", null, "C", ["T", "K"], ["T", "L"], "E"], // Fri
+// Lunch slot
+export const LUNCH_COL_INDEX = 4;
+export const LUNCH_SLOT_TIME: TimeColumn = {
+  label: "12:00–13:00",
+  start: "12:00",
+  end: "13:00",
+};
+
+// ─── Lab Slots (P, Q, R, S, T) ──────────────────────────────────────────────────────────────────
+// P, Q, R, S, T are SEPARATE independent lab slots.
+// Each maps to one specific day at the afternoon period (14:00–16:45).
+// They do NOT share a single course — each is independently assignable.
+export const LAB_SLOTS = ["P", "Q", "R", "S", "T"] as const;
+export type LabSlot = (typeof LAB_SLOTS)[number];
+
+export const LAB_START_TIME = "14:00";
+export const LAB_END_TIME = "16:45";
+
+/** Returns true if a slot letter is a lab slot (P/Q/R/S/T) */
+export function isLabSlot(slot: string): boolean {
+  return (LAB_SLOTS as readonly string[]).includes(slot);
+}
+
+/** Map each lab slot letter to which day (0=Mon…4=Fri) it occurs */
+export const LAB_DAY_MAP: Record<LabSlot, number> = {
+  P: 0, // Monday
+  Q: 1, // Tuesday
+  R: 2, // Wednesday
+  S: 3, // Thursday
+  T: 4, // Friday
+};
+
+// Keep isPQRSTSlot as alias for backward compat
+export const isPQRSTSlot = isLabSlot;
+export const PQRST_SLOTS = LAB_SLOTS;
+export type PQRSTSlot = LabSlot;
+export const PQRST_DAY_MAP = LAB_DAY_MAP;
+export const PQRST_START_TIME = LAB_START_TIME;
+export const PQRST_END_TIME = LAB_END_TIME;
+
+// ─── Slot Grid ────────────────────────────────────────────────────────────────────────────────
+// IITM official slot grid — Mon–Fri rows, 9 columns (TIME_COLUMNS).
+// Cols 6 and 7 are lab columns. Each cell is the slot letter for that day+col.
+// Lab slots P/Q/R/S/T are placed in col 6 of their respective days.
+// H, J, K, L, M appear in their proper day+column positions.
+//
+// Grid layout (each row = day, each col = TIME_COLUMNS index):
+//   col: 0    1    2    3    4     5    6    7    8
+// Mon:   A    B    C    D    LUNCH G    P    H    J
+// Tue:   B    C    D    E    LUNCH A    Q    M    F
+// Wed:   C    D    E    F    LUNCH B    R    J    G
+// Thu:   E    F    G    A    LUNCH D    S    L    H
+// Fri:   F    G    A    B    LUNCH C    T    K    E
+//
+// Cols 6 and 7 are independent cells — each is its own slot.
+export const SLOT_GRID: (string | null)[][] = [
+  ["A", "B", "C", "D", null, "G", "P", "H", "J"], // Mon
+  ["B", "C", "D", "E", null, "A", "Q", "M", "F"], // Tue
+  ["C", "D", "E", "F", null, "B", "R", "J", "G"], // Wed
+  ["E", "F", "G", "A", null, "D", "S", "L", "H"], // Thu
+  ["F", "G", "A", "B", null, "C", "T", "K", "E"], // Fri
 ];
 
 // ─── Slot Occurrences ────────────────────────────────────────────────────────────────────────
+// Maps slot letter → list of (day, col) where it appears in the timetable grid.
 export const SLOT_OCCURRENCES: Record<
   string,
   Array<{ day: number; col: number }>
@@ -73,6 +127,7 @@ export const SLOT_OCCURRENCES: Record<
     { day: 4, col: 8 },
   ],
   F: [
+    { day: 1, col: 8 },
     { day: 2, col: 3 },
     { day: 3, col: 1 },
     { day: 4, col: 0 },
@@ -83,33 +138,24 @@ export const SLOT_OCCURRENCES: Record<
     { day: 3, col: 2 },
     { day: 4, col: 1 },
   ],
+  // Hourly slots H, J, K, L, M — restored
   H: [
-    { day: 0, col: 6 },
-    { day: 1, col: 7 },
+    { day: 0, col: 7 },
     { day: 3, col: 8 },
   ],
   J: [
     { day: 0, col: 8 },
-    { day: 2, col: 6 },
-    { day: 3, col: 7 },
-  ],
-  K: [
     { day: 2, col: 7 },
-    { day: 4, col: 6 },
   ],
-  L: [
-    { day: 3, col: 6 },
-    { day: 4, col: 7 },
-  ],
-  M: [
-    { day: 0, col: 7 },
-    { day: 1, col: 6 },
-  ],
-  P: [{ day: 0, col: 6 }],
-  Q: [{ day: 1, col: 6 }],
-  R: [{ day: 2, col: 6 }],
-  S: [{ day: 3, col: 6 }],
-  T: [{ day: 4, col: 6 }],
+  K: [{ day: 4, col: 7 }],
+  L: [{ day: 3, col: 7 }],
+  M: [{ day: 1, col: 7 }],
+  // Lab slots — each is ONE specific day at col 6 (14:00–16:45)
+  P: [{ day: 0, col: 6 }], // Monday
+  Q: [{ day: 1, col: 6 }], // Tuesday
+  R: [{ day: 2, col: 6 }], // Wednesday
+  S: [{ day: 3, col: 6 }], // Thursday
+  T: [{ day: 4, col: 6 }], // Friday
 };
 
 // ─── Colors ──────────────────────────────────────────────────────────────────────────────────
@@ -159,6 +205,7 @@ const DEFAULT_SLOT_COLORS: Record<string, string> = {
   S: "#D5E8F9",
   T: "#F9D5E8",
   EXTRA_6_8: "#C4B5FD",
+  LUNCH: "#D4B8F0",
 };
 
 export function getSlotColor(slot: string): string {
@@ -220,6 +267,7 @@ export function getClassesOnDayFromEntries(
   if (dayIdx < 0 || dayIdx > 4) return [];
 
   const results: ClassInfo[] = [];
+
   for (const entry of entries) {
     if (entry.day === dayIdx) {
       results.push({
@@ -252,9 +300,45 @@ export const DAY_FULL = [
 
 export function getSlotScheduleDesc(slot: string): string {
   if (slot === "EXTRA_6_8") return "Mon–Fri 18:00–20:00";
+  if (isLabSlot(slot)) {
+    const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+    const dayIdx = LAB_DAY_MAP[slot as LabSlot];
+    return `${dayNames[dayIdx]} 14:00–16:45 (Lab)`;
+  }
   const occs = SLOT_OCCURRENCES[slot] ?? [];
   const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
   return occs
     .map((o) => `${dayNames[o.day]} ${TIME_COLUMNS[o.col].start}`)
     .join(", ");
+}
+
+/**
+ * Calculate total class hours for a list of ClassInfo items.
+ * Theory slots (A-M): 1 hour each occurrence
+ * Lab slots (P-T): 2.75 hours each
+ * Extra slot (EXTRA_6_8): 2 hours each
+ */
+export function calcTotalClassHours(classes: ClassInfo[]): {
+  totalMinutes: number;
+  formatted: string;
+} {
+  let totalMinutes = 0;
+  for (const c of classes) {
+    if (c.slot === "EXTRA_6_8") {
+      totalMinutes += 120; // 2 hours
+    } else if (isLabSlot(c.slot)) {
+      totalMinutes += 165; // 2h 45m = 165 min
+    } else {
+      totalMinutes += 60; // 1 hour for theory slots
+    }
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  const formatted =
+    hours > 0 && mins > 0
+      ? `${hours}h ${mins}m`
+      : hours > 0
+        ? `${hours}h`
+        : `${mins}m`;
+  return { totalMinutes, formatted };
 }

@@ -12,10 +12,12 @@ import type {
   ExamEntry,
   SemSettings,
   Task,
+  TimetableEntry,
 } from "../types";
 
 export interface FirestoreData {
   courses: Course[];
+  timetableEntries: TimetableEntry[];
   attendance: AttendanceRecord[];
   tasks: Task[];
   semSettings: SemSettings | null;
@@ -48,7 +50,16 @@ export async function loadFromFirestore(
     const ref = doc(db, "users", userId);
     const snap = await getDoc(ref);
     if (!snap.exists()) return null;
-    return snap.data() as FirestoreData;
+    const raw = snap.data();
+    return {
+      courses: raw.courses ?? [],
+      timetableEntries: raw.timetableEntries ?? [],
+      attendance: raw.attendance ?? [],
+      tasks: raw.tasks ?? [],
+      semSettings: raw.semSettings ?? null,
+      studentName: raw.studentName ?? "",
+      examEntries: raw.examEntries ?? [],
+    } as FirestoreData;
   } catch (err) {
     console.warn("loadFromFirestore failed:", err);
     return null;
@@ -63,7 +74,16 @@ export function subscribeToFirestore(
   const ref = doc(db, "users", userId);
   return onSnapshot(ref, (snap) => {
     if (snap.exists()) {
-      callback(snap.data() as FirestoreData);
+      const raw = snap.data();
+      callback({
+        courses: raw.courses ?? [],
+        timetableEntries: raw.timetableEntries ?? [],
+        attendance: raw.attendance ?? [],
+        tasks: raw.tasks ?? [],
+        semSettings: raw.semSettings ?? null,
+        studentName: raw.studentName ?? "",
+        examEntries: raw.examEntries ?? [],
+      } as FirestoreData);
     }
   });
 }

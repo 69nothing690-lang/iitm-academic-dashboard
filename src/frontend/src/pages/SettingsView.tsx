@@ -1,8 +1,10 @@
+import { LogOut } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "../components/GlassCard";
 import type { SemSettings } from "../types";
 import { DEFAULT_NOTIF_PREFS, type NotifPrefs } from "../utils/notifPrefs";
+import { playNotificationChime } from "../utils/notificationSound";
 import { autoDetectSem } from "../utils/semester";
 
 interface Props {
@@ -10,6 +12,8 @@ interface Props {
   onUpdateSem: (s: SemSettings) => void;
   studentName: string;
   onUpdateName: (n: string) => void;
+  storageMode?: "local" | "sync";
+  onSignOut?: () => void;
 }
 
 export function SettingsView({
@@ -17,6 +21,8 @@ export function SettingsView({
   onUpdateSem,
   studentName,
   onUpdateName,
+  storageMode,
+  onSignOut,
 }: Props) {
   const [notifPrefs, setNotifPrefs] = useState<NotifPrefs>(() => {
     try {
@@ -48,12 +54,12 @@ export function SettingsView({
 
   const handleTestNotification = async () => {
     if (typeof Notification === "undefined") {
-      setTestNotifMsg("\u274c Notifications not supported in this browser.");
+      setTestNotifMsg("❌ Notifications not supported in this browser.");
       return;
     }
     if (Notification.permission === "denied") {
       setTestNotifMsg(
-        "\u274c Notification permission denied. Please enable in browser settings.",
+        "❌ Notification permission denied. Please enable in browser settings.",
       );
       return;
     }
@@ -63,13 +69,14 @@ export function SettingsView({
       perm = await Notification.requestPermission();
     }
     if (perm === "granted") {
+      playNotificationChime();
       new Notification("Test Notification", {
         body: "InstiFlow is working",
         icon: "/icons/icon-192.png",
       });
-      setTestNotifMsg("\u2705 Test notification sent!");
+      setTestNotifMsg("✅ Test notification sent!");
     } else {
-      setTestNotifMsg("\u274c Permission not granted.");
+      setTestNotifMsg("❌ Permission not granted.");
     }
     setTimeout(() => setTestNotifMsg(""), 3000);
   };
@@ -269,8 +276,8 @@ export function SettingsView({
                 })
               }
             >
-              <option value="even">Even (Jan\u2013May)</option>
-              <option value="odd">Odd (Jul\u2013Nov)</option>
+              <option value="even">Even (Jan–May)</option>
+              <option value="odd">Odd (Jul–Nov)</option>
             </select>
           </div>
           <div style={{ flex: 1 }}>
@@ -313,7 +320,7 @@ export function SettingsView({
               fontSize: 13,
             }}
           >
-            \u21ba Reset to auto-detect
+            ↺ Reset to auto-detect
           </motion.button>
         )}
       </GlassCard>
@@ -337,7 +344,7 @@ export function SettingsView({
               fontWeight: 600,
             }}
           >
-            \ud83d\udd14 Notifications
+            🔔 Notifications
           </div>
           {savedMsg && (
             <span style={{ fontSize: 11, color: "#4ade80", fontWeight: 600 }}>
@@ -362,13 +369,13 @@ export function SettingsView({
             }}
             onClick={handleTestNotification}
           >
-            \ud83d\udd14 Test Notification
+            🔔 Test Notification
           </motion.button>
           {testNotifMsg && (
             <div
               style={{
                 fontSize: 12,
-                color: testNotifMsg.startsWith("\u2705")
+                color: testNotifMsg.startsWith("✅")
                   ? "#4ade80"
                   : "rgba(255,122,89,0.9)",
                 marginTop: 8,
@@ -379,6 +386,42 @@ export function SettingsView({
             </div>
           )}
         </div>
+
+        <Divider />
+
+        {/* Daily Summary */}
+        <ToggleRow
+          label="Daily Class Summary"
+          subtitle="One notification each morning listing all today's classes"
+          checked={notifPrefs.dailySummaryEnabled}
+          onChange={(v) => updatePrefs({ dailySummaryEnabled: v })}
+        />
+        {notifPrefs.dailySummaryEnabled && (
+          <div style={{ marginBottom: 14, paddingLeft: 4 }}>
+            <label
+              htmlFor="daily-summary-time"
+              style={{
+                fontSize: 12,
+                color: "#A9B0C7",
+                display: "block",
+                marginBottom: 4,
+              }}
+            >
+              Send at (default 7:30 AM)
+            </label>
+            <input
+              id="daily-summary-time"
+              data-ocid="settings.input"
+              className="glass-input"
+              type="time"
+              value={notifPrefs.dailySummaryTime}
+              onChange={(e) =>
+                updatePrefs({ dailySummaryTime: e.target.value })
+              }
+              style={{ width: "auto", minWidth: 120 }}
+            />
+          </div>
+        )}
 
         <Divider />
 
@@ -430,46 +473,10 @@ export function SettingsView({
                     transition: "all 0.15s",
                   }}
                 >
-                  {min} min
+                  {min} min before class
                 </button>
               ))}
             </div>
-          </div>
-        )}
-
-        <Divider />
-
-        {/* Daily Summary */}
-        <ToggleRow
-          label="Daily Class Summary"
-          subtitle="Morning summary of today\u2019s classes, tasks & exams"
-          checked={notifPrefs.dailySummaryEnabled}
-          onChange={(v) => updatePrefs({ dailySummaryEnabled: v })}
-        />
-        {notifPrefs.dailySummaryEnabled && (
-          <div style={{ marginBottom: 14, paddingLeft: 4 }}>
-            <label
-              htmlFor="daily-summary-time"
-              style={{
-                fontSize: 12,
-                color: "#A9B0C7",
-                display: "block",
-                marginBottom: 4,
-              }}
-            >
-              Daily Summary Time
-            </label>
-            <input
-              id="daily-summary-time"
-              data-ocid="settings.input"
-              className="glass-input"
-              type="time"
-              value={notifPrefs.dailySummaryTime}
-              onChange={(e) =>
-                updatePrefs({ dailySummaryTime: e.target.value })
-              }
-              style={{ width: "auto", minWidth: 120 }}
-            />
           </div>
         )}
 
@@ -652,7 +659,7 @@ export function SettingsView({
                   padding: "0 4px",
                 }}
               >
-                \u00d7
+                ×
               </motion.button>
             </div>
           ))}
@@ -693,6 +700,53 @@ export function SettingsView({
         </div>
       </GlassCard>
 
+      {/* Sign Out — only shown for sync/cloud users */}
+      {storageMode === "sync" && onSignOut && (
+        <GlassCard
+          style={{ marginBottom: 16, borderColor: "rgba(239,68,68,0.2)" }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "#606880",
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+              marginBottom: 14,
+              fontWeight: 600,
+            }}
+          >
+            Account
+          </div>
+          <motion.button
+            data-ocid="settings.signout_button"
+            whileTap={{ scale: 0.97 }}
+            whileHover={{ scale: 1.02 }}
+            onClick={onSignOut}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 20px",
+              borderRadius: 10,
+              border: "1px solid rgba(239,68,68,0.3)",
+              background: "rgba(239,68,68,0.1)",
+              color: "#fca5a5",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              transition: "all 0.15s",
+            }}
+          >
+            <LogOut size={15} />
+            Sign Out
+          </motion.button>
+          <div style={{ fontSize: 11, color: "#6B7590", marginTop: 8 }}>
+            Your data will be saved to the cloud before signing out.
+          </div>
+        </GlassCard>
+      )}
+
       {/* Danger Zone */}
       <GlassCard style={{ borderColor: "rgba(255,122,89,0.3)" }}>
         <div
@@ -728,8 +782,8 @@ export function SettingsView({
           }}
         >
           Created by{" "}
-          <span style={{ color: "#a78bfa", fontWeight: 700 }}>BHARATH</span>{" "}
-          \u00b7 BE24
+          <span style={{ color: "#a78bfa", fontWeight: 700 }}>BHARATH</span> ·
+          BE24
         </div>
         <div
           style={{

@@ -1,0 +1,52 @@
+// Version: 1.0.0
+type AcademicData__1073412992 = Text;
+type Data__791452850<K, V> =
+  {var count : Nat__490723111; kvs : [var ?(K, V)]};
+type Holiday__491596039 = {date : Text; name : Text};
+type Internal__8484328<K, V> =
+  {children : [var ?Node__46230540<K, V>]; data : Data__791452850<K, V>};
+type Leaf__809889148<K, V> = {data : Data__791452850<K, V>};
+type Nat__490723111 = Nat__920180692;
+type Nat__920180692 = Nat;
+type Node__46230540<K, V> =
+  {#internal : Internal__8484328<K, V>; #leaf : Leaf__809889148<K, V>};
+type SemesterConfig__965208575 =
+  {
+    classEnd : Text;
+    classStart : Text;
+    endSemEnd : Text;
+    endSemStart : Text;
+    events : [Holiday__491596039];
+    holidays : [Holiday__491596039];
+    id : Text;
+    isActive : Bool;
+    name : Text;
+    quiz1End : Text;
+    quiz1Start : Text;
+    quiz2End : Text;
+    quiz2Start : Text;
+    semType : Text;
+    slotExamDates : [SlotExamDate__712977195];
+    year : Nat
+  };
+type SlotExamDate__712977195 =
+  {endSem : Text; quiz1 : Text; quiz2 : Text; slot : Text};
+type UserProfile__491224006 = {name : Text};
+actor {
+  stable var adminPrincipal : ?Principal;
+  stable records :
+    {
+      var root : Node__46230540<Principal, AcademicData__1073412992>;
+      var size : Nat__490723111
+    };
+  stable semesterConfigs :
+    {
+      var root : Node__46230540<Text, SemesterConfig__965208575>;
+      var size : Nat__490723111
+    };
+  stable userProfiles :
+    {
+      var root : Node__46230540<Principal, UserProfile__491224006>;
+      var size : Nat__490723111
+    }
+};

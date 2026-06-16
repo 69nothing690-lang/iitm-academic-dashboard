@@ -18,7 +18,7 @@ export interface NotifPrefs {
 
 export const DEFAULT_NOTIF_PREFS: NotifPrefs = {
   dailySummaryEnabled: true,
-  dailySummaryTime: "07:00",
+  dailySummaryTime: "07:30",
   classRemindersEnabled: true,
   classReminderMinutes: 10,
   examRemindersEnabled: true,

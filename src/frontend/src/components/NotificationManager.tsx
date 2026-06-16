@@ -1,5 +1,10 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import {
+  getFCMToken,
+  requestNotificationPermissionAndToken,
+  setupForegroundNotifications,
+} from "../lib/fcm";
 import type {
   AttendanceRecord,
   Course,
@@ -8,17 +13,17 @@ import type {
   Task,
   TimetableEntry,
 } from "../types";
-import { calcAttendance } from "../utils/attendance";
-import {
-  DEFAULT_NOTIF_PREFS,
-  type NotifPrefs,
-  getNotifPrefs,
-} from "../utils/notifPrefs";
+import { cleanText } from "../utils/cleanText";
+import { type NotifPrefs, getNotifPrefs } from "../utils/notifPrefs";
+import { playNotificationChime } from "../utils/notificationSound";
 import {
   EXTRA_SLOT_COL_INDEX,
   EXTRA_SLOT_TIME,
   SLOT_OCCURRENCES,
   TIME_COLUMNS,
+  calcTotalClassHours,
+  getClassesOnDayFromEntries,
+  isLabSlot,
 } from "../utils/slots";
 
 interface Props {
@@ -43,6 +48,15 @@ function toISO(date: Date): string {
   return date.toISOString();
 }
 
+function formatTime12(time24: string): string {
+  const [hStr, mStr] = time24.split(":");
+  const h = Number.parseInt(hStr, 10);
+  const m = Number.parseInt(mStr, 10);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m.toString().padStart(2, "0")} ${period}`;
+}
+
 function buildSchedule(
   courses: Course[],
   timetableEntries: TimetableEntry[],
@@ -58,6 +72,84 @@ function buildSchedule(
     scheduledAt: string;
   }> = [];
 
+  // ── Class reminders for today AND tomorrow (so SW persists overnight reminders) ──
+  if (prefs.classRemindersEnabled) {
+    const reminderMinutes = prefs.classReminderMinutes ?? 10;
+    // Schedule for today and tomorrow
+    for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
+      const targetDate = new Date(now);
+      targetDate.setDate(targetDate.getDate() + dayOffset);
+      const targetDayOfWeek = targetDate.getDay(); // 0=Sun, 1=Mon, ...6=Sat
+      const iitmDay = targetDayOfWeek - 1; // 0=Mon...4=Fri
+      if (iitmDay < 0 || iitmDay > 4) continue; // Skip weekends
+
+      const targetDateStr = targetDate.toISOString().split("T")[0];
+
+      const todayEntries = timetableEntries.filter(
+        (e) => e.day === iitmDay && e.slot !== "LUNCH",
+      );
+      const itemsToSchedule =
+        todayEntries.length > 0
+          ? todayEntries.map((e) => ({
+              name: e.courseName,
+              slot: e.slot,
+              startTime: e.startTime,
+              venue: e.venue,
+              id: e.id,
+            }))
+          : courses.flatMap((course) => {
+              const occs =
+                course.slot === "EXTRA_6_8"
+                  ? [{ day: iitmDay, col: EXTRA_SLOT_COL_INDEX }]
+                  : (SLOT_OCCURRENCES[course.slot] ?? []);
+              return occs
+                .filter((o) => o.day === iitmDay)
+                .map((occ) => {
+                  const col =
+                    course.slot === "EXTRA_6_8"
+                      ? EXTRA_SLOT_TIME
+                      : TIME_COLUMNS[occ.col];
+                  return {
+                    name: course.name,
+                    slot: course.slot,
+                    startTime: col.start,
+                    venue: course.venue,
+                    id: course.id,
+                  };
+                });
+            });
+
+      for (const item of itemsToSchedule) {
+        const [h, m] = item.startTime.split(":").map(Number);
+        const classStart = new Date(targetDate);
+        classStart.setHours(h, m, 0, 0);
+        const reminderTime = new Date(
+          classStart.getTime() - reminderMinutes * 60 * 1000,
+        );
+
+        if (reminderTime <= now) continue; // Already past
+
+        const tag = `class-${targetDateStr}-${item.slot}-${item.startTime}`;
+        const timeStr = formatTime12(item.startTime);
+        const bodyText = item.venue
+          ? `${item.name} at ${timeStr}\n${item.venue}`
+          : `${item.name} at ${timeStr}`;
+        const slotLabel = isLabSlot(item.slot)
+          ? `Lab Slot ${item.slot}`
+          : item.slot === "EXTRA_6_8"
+            ? "Extra Slot"
+            : `Slot ${item.slot}`;
+
+        notifications.push({
+          tag,
+          title: `Upcoming Class — ${slotLabel}`,
+          body: bodyText,
+          scheduledAt: toISO(reminderTime),
+        });
+      }
+    }
+  }
+
   // ── Daily summary ──
   if (prefs.dailySummaryEnabled) {
     const [sumH, sumM] = prefs.dailySummaryTime.split(":").map(Number);
@@ -70,51 +162,60 @@ function buildSchedule(
     const iitmDay = summaryDay - 1;
     const summaryDateStr = dailySummaryDate.toISOString().split("T")[0];
 
-    // Use timetableEntries if available, otherwise fall back to courses
-    const todayCourseNames: string[] = [];
+    const summaryLines: string[] = [];
+    const seenCodes = new Set<string>();
+
     if (timetableEntries.length > 0) {
-      const uniqueNames = new Set<string>();
-      for (const e of timetableEntries) {
-        if (e.day === iitmDay) uniqueNames.add(`${e.courseName} (${e.slot})`);
+      const dayEntries = timetableEntries
+        .filter((e) => e.day === iitmDay && e.slot !== "LUNCH")
+        .sort((a, b) => a.startTime.localeCompare(b.startTime));
+      for (const e of dayEntries) {
+        const key = `${e.courseCode || e.courseId}-${e.startTime}`;
+        if (seenCodes.has(key)) continue;
+        seenCodes.add(key);
+        const timeStr = formatTime12(e.startTime);
+        const venuePart = e.venue ? ` (${e.venue})` : " (No venue)";
+        summaryLines.push(`• ${e.courseName} – ${timeStr}${venuePart}`);
       }
-      todayCourseNames.push(...uniqueNames);
     } else if (iitmDay >= 0 && iitmDay <= 4) {
       for (const c of courses) {
         const occs =
           c.slot === "EXTRA_6_8"
             ? [{ day: iitmDay, col: EXTRA_SLOT_COL_INDEX }]
             : (SLOT_OCCURRENCES[c.slot] ?? []);
-        if (occs.some((o) => o.day === iitmDay))
-          todayCourseNames.push(`${c.name} (${c.slot})`);
+        if (occs.some((o) => o.day === iitmDay)) {
+          const occ = occs.find((o) => o.day === iitmDay);
+          const col = occ
+            ? c.slot === "EXTRA_6_8"
+              ? EXTRA_SLOT_TIME
+              : TIME_COLUMNS[occ.col]
+            : null;
+          const timeStr = col ? formatTime12(col.start) : "";
+          const venuePart = c.venue ? ` (${c.venue})` : "";
+          summaryLines.push(`• ${c.name} – ${timeStr}${venuePart}`);
+        }
       }
     }
 
-    const tasksDueToday = tasks.filter(
-      (t) => !t.completed && t.date === summaryDateStr,
-    );
-    const examsDueToday = examEntries.filter((e) => e.date === summaryDateStr);
+    // Calculate total hours for summary
+    const dayClassInfos =
+      timetableEntries.length > 0
+        ? getClassesOnDayFromEntries(iitmDay + 1, timetableEntries)
+        : [];
+    const { formatted: totalFormatted } = calcTotalClassHours(dayClassInfos);
 
+    const classCount = summaryLines.length;
     let summaryBody = "";
-    if (todayCourseNames.length > 0) {
-      summaryBody += todayCourseNames.slice(0, 3).join(", ");
-      if (todayCourseNames.length > 3)
-        summaryBody += ` +${todayCourseNames.length - 3} more`;
-      summaryBody += ". ";
+    if (classCount > 0) {
+      summaryBody = `You have ${classCount} class${classCount !== 1 ? "es" : ""} today (${totalFormatted})\n\n${summaryLines.join("\n")}`;
     } else {
-      summaryBody += "No classes today. ";
-    }
-    if (tasksDueToday.length > 0)
-      summaryBody += `${tasksDueToday.length} task${tasksDueToday.length > 1 ? "s" : ""} due. `;
-    for (const ex of examsDueToday) {
-      const course = courses.find((c) => c.id === ex.courseId);
-      if (course)
-        summaryBody += `${course.name} ${ex.examType === "quiz1" ? "Quiz 1" : ex.examType === "quiz2" ? "Quiz 2" : "End Sem"} today! `;
+      summaryBody = "No classes today. Have a great day!";
     }
 
     notifications.push({
       tag: `daily-summary-${summaryDateStr}`,
-      title: "InstiFlow \u2014 Good Morning \ud83d\udcda",
-      body: summaryBody.trim() || "Have a great day!",
+      title: "Today's Schedule — InstiFlow",
+      body: summaryBody.trim(),
       scheduledAt: toISO(dailySummaryDate),
     });
   }
@@ -123,16 +224,16 @@ function buildSchedule(
   if (prefs.examRemindersEnabled) {
     let offsets: Array<{ days: number; label: string }> = [];
     if (prefs.examReminderTiming === "1d")
-      offsets = [{ days: 1, label: "Exam Tomorrow \ud83d\udd34" }];
+      offsets = [{ days: 1, label: "Exam Tomorrow" }];
     else if (prefs.examReminderTiming === "3d")
-      offsets = [{ days: 3, label: "Exam in 3 Days \u26a0\ufe0f" }];
+      offsets = [{ days: 3, label: "Exam in 3 Days" }];
     else if (prefs.examReminderTiming === "7d")
-      offsets = [{ days: 7, label: "Exam in 1 Week \u23f0" }];
+      offsets = [{ days: 7, label: "Exam in 1 Week" }];
     else
       offsets = [
-        { days: 7, label: "Exam in 1 Week \u23f0" },
-        { days: 3, label: "Exam in 3 Days \u26a0\ufe0f" },
-        { days: 1, label: "Exam Tomorrow \ud83d\udd34" },
+        { days: 7, label: "Exam in 1 Week" },
+        { days: 3, label: "Exam in 3 Days" },
+        { days: 1, label: "Exam Tomorrow" },
       ];
 
     for (const ex of examEntries) {
@@ -157,7 +258,7 @@ function buildSchedule(
         if (alertTime > now) {
           notifications.push({
             tag: `exam-${ex.id}-${days}d`,
-            title: `InstiFlow \u2014 ${label}`,
+            title: `InstiFlow — ${label}`,
             body,
             scheduledAt: toISO(alertTime),
           });
@@ -182,7 +283,7 @@ function buildSchedule(
         if (twoDaysBefore > now) {
           notifications.push({
             tag: `task-2d-${t.id}`,
-            title: "InstiFlow \u2014 Task Due in 2 Days \ud83d\udccb",
+            title: "InstiFlow — Task Due in 2 Days",
             body: t.title,
             scheduledAt: toISO(twoDaysBefore),
           });
@@ -199,7 +300,7 @@ function buildSchedule(
         if (dayBefore > now) {
           notifications.push({
             tag: `task-before-${t.id}`,
-            title: "InstiFlow \u2014 Task Due Tomorrow \ud83d\udccb",
+            title: "InstiFlow — Task Due Tomorrow",
             body: t.title,
             scheduledAt: toISO(dayBefore),
           });
@@ -211,7 +312,7 @@ function buildSchedule(
       if (dueDayAlert > now) {
         notifications.push({
           tag: `task-due-${t.id}`,
-          title: "InstiFlow \u2014 Task Due Today \ud83d\udd14",
+          title: "InstiFlow — Task Due Today",
           body: t.title,
           scheduledAt: toISO(dueDayAlert),
         });
@@ -257,65 +358,189 @@ export function NotificationManager({
 
   const showForeground = (title: string, body: string) => {
     const id = `${Date.now()}-${Math.random()}`;
-    setForegroundNotifs((prev) => [...prev, { id, title, body }]);
+    setForegroundNotifs((prev) => [
+      ...prev,
+      { id, title: cleanText(title), body: cleanText(body) },
+    ]);
     setTimeout(
       () => setForegroundNotifs((prev) => prev.filter((n) => n.id !== id)),
       6000,
     );
   };
 
-  const showNotification = (title: string, body: string) => {
+  const showNotification = (title: string, body: string, tag?: string) => {
+    const cleanTitle = cleanText(title);
+    const cleanBody = cleanText(body);
+
+    // Play chime sound
+    playNotificationChime();
+
+    // Vibrate on mobile (200ms, pause 100ms, 200ms)
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      try {
+        navigator.vibrate([200, 100, 200]);
+      } catch {
+        // ignore if not supported
+      }
+    }
+
     if (
       typeof Notification !== "undefined" &&
       Notification.permission === "granted"
     ) {
-      new Notification(title, { body, icon: "/icons/icon-192.png" });
+      new Notification(cleanTitle, {
+        body: cleanBody,
+        icon: "/icons/icon-192.png",
+        tag: tag,
+      });
     }
-    showForeground(title, body);
+    showForeground(cleanTitle, cleanBody);
   };
 
   // Expose showNotification globally for test button
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional stable ref
   useEffect(() => {
-    (window as any).__instiflowNotify = showNotification;
+    (window as unknown as Record<string, unknown>).__instiflowNotify =
+      showNotification;
     return () => {
-      (window as any).__instiflowNotify = undefined;
+      (window as unknown as Record<string, unknown>).__instiflowNotify =
+        undefined;
     };
   }, []);
 
-  // Permission request + iOS banner
+  // Permission request + FCM token + iOS banner + periodic sync
   useEffect(() => {
     if (typeof Notification === "undefined") return;
-    if (Notification.permission === "default") {
-      Notification.requestPermission().then((p) => setPermission(p));
-    }
+
+    const init = async () => {
+      const token = await requestNotificationPermissionAndToken();
+      if (token) {
+        setPermission("granted");
+        // Register periodic background sync for more reliable Android delivery
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          if ("periodicSync" in reg) {
+            await (
+              reg as unknown as {
+                periodicSync: {
+                  register: (
+                    tag: string,
+                    opts: { minInterval: number },
+                  ) => Promise<void>;
+                };
+              }
+            ).periodicSync.register("check-notifications", {
+              minInterval: 60 * 1000,
+            });
+          }
+        } catch {
+          // Periodic sync not supported or permission denied — that's fine
+        }
+      } else if (Notification.permission !== "denied") {
+        // Fallback: still try plain token fetch if already granted elsewhere
+        if (Notification.permission === "granted") {
+          getFCMToken().catch((e) =>
+            console.warn("[FCM] Token fetch failed:", e),
+          );
+          setPermission("granted");
+        }
+      }
+    };
+
+    init();
+
     if (isIOS && !isStandalone && Notification.permission !== "granted") {
       setShowIOSBanner(true);
     }
   }, []);
 
-  // Push schedule to SW
+  // Set up FCM foreground message listener
+  // biome-ignore lint/correctness/useExhaustiveDependencies: showForeground is stable
+  useEffect(() => {
+    const unsubscribe = setupForegroundNotifications((payload) => {
+      const title = payload.notification?.title ?? "InstiFlow";
+      const body = payload.notification?.body ?? "";
+      playNotificationChime();
+      showForeground(title, body);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Push schedule to SW — also refreshes on page visibility (re-open)
   useEffect(() => {
     if (permission !== "granted") return;
     if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
-    const prefs = prefsRef.current;
-    const schedule = buildSchedule(
-      courses,
-      timetableEntries,
-      tasks,
-      examEntries,
-      prefs,
-    );
-    navigator.serviceWorker.ready.then((reg) => {
-      reg.active?.postMessage({
+
+    const sendSchedule = async () => {
+      const prefs = prefsRef.current;
+      const schedule = buildSchedule(
+        courses,
+        timetableEntries,
+        tasks,
+        examEntries,
+        prefs,
+      );
+
+      const message = {
         type: "SCHEDULE_NOTIFICATIONS",
         notifications: schedule,
-      });
-    });
+      };
+
+      try {
+        // Try the active controller first (most direct path)
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage(message);
+        }
+
+        // Also post to the ready SW (covers cases where controller differs)
+        let reg = await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("SW ready timeout")), 5000),
+          ),
+        ]);
+        // If the ready SW is not the FCM one, try to get it explicitly
+        if (!reg.active) {
+          const existing = await navigator.serviceWorker.getRegistration(
+            "/firebase-messaging-sw.js",
+          );
+          if (existing?.active) reg = existing;
+        }
+        if (reg.active) {
+          reg.active.postMessage(message);
+        }
+      } catch (err) {
+        console.warn("[Notif] Failed to post schedule to SW:", err);
+        // Fallback: try all registrations
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) {
+            if (r.active) {
+              r.active.postMessage(message);
+            }
+          }
+        } catch (fallbackErr) {
+          console.warn("[Notif] SW schedule fallback failed:", fallbackErr);
+        }
+      }
+    };
+
+    sendSchedule();
+
+    // Re-send schedule every time the page becomes visible (user switches back to tab)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        sendSchedule();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [courses, timetableEntries, tasks, examEntries, permission]);
 
-  // Class reminders based on user timing pref
-  // biome-ignore lint/correctness/useExhaustiveDependencies: showForeground is stable
+  // Class reminders — uses prefs.classReminderMinutes (default 10)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: showNotification is stable
   useEffect(() => {
     if (typeof Notification === "undefined") return;
     if (permission !== "granted") return;
@@ -328,10 +553,13 @@ export function NotificationManager({
     if (iitmDay < 0 || iitmDay > 4) return;
 
     const timers: ReturnType<typeof setTimeout>[] = [];
-    const reminderMinutes = prefs.classReminderMinutes;
+    // Use user-configured reminder minutes (default 10)
+    const reminderMinutes = prefs.classReminderMinutes ?? 10;
 
     // Use timetableEntries if available
-    const todayEntries = timetableEntries.filter((e) => e.day === iitmDay);
+    const todayEntries = timetableEntries.filter(
+      (e) => e.day === iitmDay && e.slot !== "LUNCH",
+    );
     const itemsToSchedule =
       todayEntries.length > 0
         ? todayEntries.map((e) => ({
@@ -340,6 +568,7 @@ export function NotificationManager({
             startTime: e.startTime,
             venue: e.venue,
             id: e.id,
+            day: e.day,
           }))
         : courses.flatMap((course) => {
             const occs =
@@ -359,9 +588,12 @@ export function NotificationManager({
                   startTime: col.start,
                   venue: course.venue,
                   id: course.id,
+                  day: iitmDay,
                 };
               });
           });
+
+    const todayDateStr = now.toISOString().split("T")[0];
 
     for (const item of itemsToSchedule) {
       const [h, m] = item.startTime.split(":").map(Number);
@@ -372,22 +604,30 @@ export function NotificationManager({
       );
       const msUntil = reminderTime.getTime() - now.getTime();
 
+      // Deduplication key: class-[date]-[slot]-[startTime]
+      const dedupKey = `class-${todayDateStr}-${item.slot}-${item.startTime}`;
+
       if (msUntil > 0 && msUntil < 24 * 60 * 60 * 1000) {
-        const tag = `class-reminder-${item.id}-${item.startTime}`;
+        if (firedRef.current.has(dedupKey)) continue;
+
+        const timeStr = formatTime12(item.startTime);
+        // Format: "CourseName at HH:MM AM/PM\nVenue"
+        const bodyText = item.venue
+          ? `${item.name} at ${timeStr}\n${item.venue}`
+          : `${item.name} at ${timeStr}`;
+
+        // For lab slots show proper label
+        const slotLabel = isLabSlot(item.slot)
+          ? `Lab Slot ${item.slot}`
+          : item.slot === "EXTRA_6_8"
+            ? "Extra Slot"
+            : `Slot ${item.slot}`;
+
         const timer = setTimeout(() => {
           if (Notification.permission !== "granted") return;
-          new Notification(
-            `InstiFlow \u2014 Class in ${reminderMinutes} Minutes \ud83d\udd14`,
-            {
-              body: `${item.name} (Slot ${item.slot}) at ${item.startTime}${item.venue ? ` \u00b7 ${item.venue}` : ""}`,
-              icon: "/icons/icon-192.png",
-              tag,
-            },
-          );
-          showForeground(
-            `Class in ${reminderMinutes} min`,
-            `${item.name} at ${item.startTime}`,
-          );
+          if (firedRef.current.has(dedupKey)) return;
+          firedRef.current.add(dedupKey);
+          showNotification(`Upcoming Class — ${slotLabel}`, bodyText, dedupKey);
         }, msUntil);
         timers.push(timer);
       }
@@ -398,7 +638,7 @@ export function NotificationManager({
     };
   }, [courses, timetableEntries, permission]);
 
-  // In-app foreground polling (7am checks, attendance, tasks)
+  // In-app foreground polling (daily summary, task reminders)
   // biome-ignore lint/correctness/useExhaustiveDependencies: showNotification is stable
   useEffect(() => {
     if (typeof Notification === "undefined") return;
@@ -415,45 +655,54 @@ export function NotificationManager({
 
       const [sumH, sumM] = prefs.dailySummaryTime.split(":").map(Number);
       if (prefs.dailySummaryEnabled && h === sumH && m < sumM + 5) {
-        const todayEntries = timetableEntries.filter((e) => e.day === iitmDay);
-        const items =
-          todayEntries.length > 0
-            ? todayEntries
-            : iitmDay >= 0 && iitmDay <= 4
-              ? courses.filter((c) => {
-                  const occs =
-                    c.slot === "EXTRA_6_8"
-                      ? [{ day: iitmDay }]
-                      : (SLOT_OCCURRENCES[c.slot] ?? []);
-                  return occs.some((o) => o.day === iitmDay);
-                })
-              : [];
+        const summaryKey = `daily-summary-${today}`;
+        if (!firedRef.current.has(summaryKey)) {
+          firedRef.current.add(summaryKey);
+          const todayEntries = timetableEntries.filter(
+            (e) => e.day === iitmDay && e.slot !== "LUNCH",
+          );
+          const summaryLines: string[] = [];
+          const seenKeys = new Set<string>();
 
-        for (const item of items) {
-          const name = (item as any).courseName ?? (item as any).name;
-          const slot = (item as any).slot;
-          const key = `class-${today}-${(item as any).courseId ?? (item as any).id}`;
-          if (!firedRef.current.has(key)) {
-            firedRef.current.add(key);
-            showNotification(
-              "InstiFlow \u2014 Class Today \ud83d\udcda",
-              `${name} (Slot ${slot})`,
+          if (todayEntries.length > 0) {
+            const sorted = [...todayEntries].sort((a, b) =>
+              a.startTime.localeCompare(b.startTime),
             );
-          }
-        }
-
-        for (const c of courses) {
-          const stats = calcAttendance(attendance, c.id);
-          if (stats.percentage < 75 && stats.total > 0) {
-            const key = `attn-warn-${today}-${c.id}`;
-            if (!firedRef.current.has(key)) {
-              firedRef.current.add(key);
-              showNotification(
-                "InstiFlow \u2014 Attendance Warning \u26a0\ufe0f",
-                `${c.name}: ${stats.percentage}% (need ${stats.toReach75} more classes)`,
-              );
+            for (const e of sorted) {
+              const key = `${e.courseCode || e.courseId}-${e.startTime}`;
+              if (seenKeys.has(key)) continue;
+              seenKeys.add(key);
+              const timeStr = formatTime12(e.startTime);
+              const venuePart = e.venue ? ` (${e.venue})` : " (No venue)";
+              summaryLines.push(`• ${e.courseName} – ${timeStr}${venuePart}`);
+            }
+          } else if (iitmDay >= 0 && iitmDay <= 4) {
+            for (const c of courses) {
+              const occs =
+                c.slot === "EXTRA_6_8"
+                  ? [{ day: iitmDay }]
+                  : (SLOT_OCCURRENCES[c.slot] ?? []);
+              if (occs.some((o) => o.day === iitmDay)) {
+                summaryLines.push(`• ${c.name}`);
+              }
             }
           }
+
+          // Calculate total hours
+          const dayClassInfos =
+            todayEntries.length > 0
+              ? getClassesOnDayFromEntries(todayDay, timetableEntries)
+              : [];
+          const { formatted: totalFormatted } =
+            calcTotalClassHours(dayClassInfos);
+
+          const classCount = summaryLines.length;
+          const summaryBody =
+            classCount > 0
+              ? `You have ${classCount} class${classCount !== 1 ? "es" : ""} today (${totalFormatted})\n\n${summaryLines.join("\n")}`
+              : "No classes today. Have a great day!";
+
+          showNotification("Today's Schedule — InstiFlow", summaryBody);
         }
       }
 
@@ -468,10 +717,7 @@ export function NotificationManager({
             if (!firedRef.current.has(key)) {
               firedRef.current.add(key);
               const label = t.date === today ? "Due Today" : "Due Tomorrow";
-              showNotification(
-                `InstiFlow \u2014 Task ${label} \ud83d\udccb`,
-                t.title,
-              );
+              showNotification(`InstiFlow — Task ${label}`, t.title);
             }
           }
         }
@@ -523,9 +769,7 @@ export function NotificationManager({
               <div
                 style={{ display: "flex", alignItems: "flex-start", gap: 10 }}
               >
-                <span style={{ fontSize: 18, lineHeight: 1.2 }}>
-                  \ud83d\udd14
-                </span>
+                <span style={{ fontSize: 18, lineHeight: 1.2 }}>🔔</span>
                 <div style={{ flex: 1 }}>
                   <p
                     style={{
@@ -544,6 +788,7 @@ export function NotificationManager({
                       fontSize: 12,
                       margin: "3px 0 0",
                       lineHeight: 1.4,
+                      whiteSpace: "pre-line",
                     }}
                   >
                     {notif.body}
@@ -606,9 +851,7 @@ export function NotificationManager({
               <div
                 style={{ display: "flex", alignItems: "flex-start", gap: 10 }}
               >
-                <span style={{ fontSize: 22, lineHeight: 1.2 }}>
-                  \ud83d\udcf1
-                </span>
+                <span style={{ fontSize: 22, lineHeight: 1.2 }}>📱</span>
                 <div style={{ flex: 1 }}>
                   <p
                     style={{
@@ -638,7 +881,7 @@ export function NotificationManager({
                         fontWeight: 700,
                       }}
                     >
-                      Share \u2b06
+                      Share ⬆
                     </span>{" "}
                     then{" "}
                     <span
@@ -675,7 +918,7 @@ export function NotificationManager({
                     transition: "background 0.2s",
                   }}
                 >
-                  \u00d7
+                  ×
                 </button>
               </div>
             </div>

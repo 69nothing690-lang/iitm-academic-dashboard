@@ -1,15 +1,14 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
-import { useInternetIdentity } from "../hooks/useInternetIdentity";
 
 interface Props {
   onChoice: (choice: "local" | "sync") => void;
 }
 
 export function StorageChoiceScreen({ onChoice }: Props) {
-  const { login, isLoggingIn, isLoginSuccess, identity } =
-    useInternetIdentity();
+  const isLoggingIn = false;
   const [loginStarted, setLoginStarted] = useState(false);
+  void loginStarted; // suppress unused warning — kept for future II integration
 
   const handleLocal = () => {
     localStorage.setItem("instiflow_storage_choice", "local");
@@ -18,14 +17,12 @@ export function StorageChoiceScreen({ onChoice }: Props) {
 
   const handleSync = async () => {
     setLoginStarted(true);
-    login();
+    // Internet Identity not enabled — fall back to local
+    handleLocal();
   };
 
   // Once login succeeds, save choice and proceed
-  if (loginStarted && (isLoginSuccess || identity)) {
-    localStorage.setItem("instiflow_storage_choice", "sync");
-    onChoice("sync");
-  }
+  // (Internet Identity integration pending)
 
   return (
     <motion.div

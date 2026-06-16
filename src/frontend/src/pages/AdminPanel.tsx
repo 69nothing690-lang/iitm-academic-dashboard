@@ -1,7 +1,20 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
-import type { Holiday, SlotExamDate } from "../backend.d";
 import { GlassCard } from "../components/GlassCard";
+
+// Local type definitions (previously imported from backend.d)
+interface Holiday {
+  date: string;
+  name: string;
+  type?: string;
+}
+
+interface SlotExamDate {
+  slot: string;
+  quiz1: string;
+  quiz2: string;
+  endSem: string;
+}
 
 const LS_KEY = "instiflow_semester_configs";
 

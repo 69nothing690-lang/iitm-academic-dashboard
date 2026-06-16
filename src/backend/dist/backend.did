@@ -1,0 +1,45 @@
+type UserProfile = record {name: text;};
+type SlotExamDate = 
+ record {
+   endSem: text;
+   quiz1: text;
+   quiz2: text;
+   slot: text;
+ };
+type SemesterConfig = 
+ record {
+   classEnd: text;
+   classStart: text;
+   endSemEnd: text;
+   endSemStart: text;
+   events: vec Holiday;
+   holidays: vec Holiday;
+   id: text;
+   isActive: bool;
+   name: text;
+   quiz1End: text;
+   quiz1Start: text;
+   quiz2End: text;
+   quiz2Start: text;
+   semType: text;
+   slotExamDates: vec SlotExamDate;
+   year: nat;
+ };
+type Holiday = 
+ record {
+   date: text;
+   name: text;
+ };
+type AcademicData = text;
+service : {
+  deleteSemesterConfig: (id: text) -> ();
+  getActiveSemesterConfig: () -> (opt SemesterConfig) query;
+  getCallerSnapshot: () -> (opt AcademicData) query;
+  getCallerUserProfile: () -> (opt UserProfile) query;
+  getUserProfile: (user: principal) -> (opt UserProfile) query;
+  listSemesterConfigs: () -> (vec SemesterConfig) query;
+  saveCallerSnapshot: (snapshot: AcademicData) -> ();
+  saveCallerUserProfile: (profile: UserProfile) -> ();
+  saveSemesterConfig: (config: SemesterConfig) -> ();
+  setActiveSemester: (id: text) -> ();
+}

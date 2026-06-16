@@ -1,5 +1,7 @@
+import { cleanObject } from "./cleanText";
+
 // ── App version — bump this if localStorage schema changes ───────────────────────
-const APP_VERSION = "69";
+const APP_VERSION = "70";
 const VERSION_KEY = "instiflow_app_version";
 
 /**
@@ -49,7 +51,9 @@ export function getItem<T>(key: string, defaultValue: T): T {
     if (!stored) return defaultValue;
     const parsed = JSON.parse(stored) as T;
     // Guard against null stored as "null" string
-    return parsed ?? defaultValue;
+    if (parsed == null) return defaultValue;
+    // Clean any unicode corruption in stored data
+    return cleanObject(parsed) as T;
   } catch {
     // Corrupted JSON — remove the bad entry and return default
     try {

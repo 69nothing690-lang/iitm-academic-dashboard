@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { NotificationManager } from "./components/NotificationManager";
 import { Sidebar, type TabId } from "./components/Sidebar";
+import { SplashScreen } from "./components/SplashScreen";
 import { TAB_THEMES, TabThemeContext } from "./contexts/TabTheme";
 import { useAppData } from "./hooks/useAppData";
 import { AdminPanel } from "./pages/AdminPanel";
@@ -111,6 +112,9 @@ function useIsMobile() {
 }
 
 export default function App() {
+  // ── Splash screen — shown for first 1500ms ───────────────────────────────
+  const [showSplash, setShowSplash] = useState(true);
+
   // ── Restore session on refresh ───────────────────────────────────────────
   // If user previously chose a storage mode, skip the landing/login flow.
   const choice = getStoredChoice();
@@ -145,7 +149,31 @@ export default function App() {
             if (cancelled) return;
             unsub();
             if (user) {
-              // Firebase confirms user is still logged in
+              // Check for account switch — clear stale local data
+              const storedUid = localStorage.getItem("instiflow_current_uid");
+              if (storedUid && storedUid !== user.uid) {
+                const dataKeys = [
+                  "courses",
+                  "timetableEntries",
+                  "attendance",
+                  "tasks",
+                  "semSettings",
+                  "studentName",
+                  "examEntries",
+                ];
+                for (const key of dataKeys) {
+                  try {
+                    localStorage.removeItem(key);
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              }
+              try {
+                localStorage.setItem("instiflow_current_uid", user.uid);
+              } catch {
+                /* ignore */
+              }
               setUserId(user.uid);
               setStorageMode("sync");
               setShowLanding(false);
@@ -241,6 +269,11 @@ export default function App() {
       setUserId(uid);
       setStorageMode("sync");
       setMigrateLocal(migrate ?? false);
+      try {
+        localStorage.setItem("instiflow_current_uid", uid);
+      } catch {
+        /* ignore */
+      }
     } else {
       setStorageMode("local");
     }
@@ -327,6 +360,61 @@ export default function App() {
               onUpdateSem={data.setSemSettings}
               studentName={data.studentName}
               onUpdateName={data.setStudentName}
+              storageMode={storageMode}
+              onSignOut={async () => {
+                // Save to Firestore before signing out
+                if (userId && storageMode === "sync") {
+                  try {
+                    const { saveToFirestore } = await import(
+                      "./utils/firestoreSync"
+                    );
+                    await saveToFirestore(userId, {
+                      courses: data.courses,
+                      timetableEntries: data.timetableEntries,
+                      attendance: data.attendance,
+                      tasks: data.tasks,
+                      semSettings: data.semSettings,
+                      studentName: data.studentName,
+                      examEntries: data.examEntries,
+                    });
+                  } catch {
+                    /* ignore save errors on sign out */
+                  }
+                }
+                // Sign out from Firebase
+                try {
+                  const { firebaseAuth } = await import("./lib/firebase");
+                  const { signOut } = await import("firebase/auth");
+                  await signOut(firebaseAuth());
+                } catch {
+                  /* ignore */
+                }
+                // Clear ALL localStorage keys
+                try {
+                  const keysToRemove = [
+                    "instiflow_user",
+                    "instiflow_storage_choice",
+                    "instiflow_current_uid",
+                    "courses",
+                    "timetableEntries",
+                    "attendance",
+                    "tasks",
+                    "semSettings",
+                    "studentName",
+                    "examEntries",
+                  ];
+                  for (const key of keysToRemove) {
+                    localStorage.removeItem(key);
+                  }
+                } catch {
+                  /* ignore */
+                }
+                // Return to landing page
+                setUserId(undefined);
+                setStorageMode("local");
+                setShowLanding(true);
+                setShowLogin(false);
+              }}
             />
           );
         default:
@@ -356,6 +444,9 @@ export default function App() {
 
   return (
     <>
+      {/* Splash screen — shown on first load for 1500ms */}
+      {showSplash && <SplashScreen onDone={() => setShowSplash(false)} />}
+
       <AnimatePresence mode="wait">
         {showLanding ? (
           <motion.div

@@ -39,20 +39,12 @@ export interface UserProfile {
     name: string;
 }
 export type AcademicData = string;
-export enum UserRole {
-    admin = "admin",
-    user = "user",
-    guest = "guest"
-}
 export interface backendInterface {
-    assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
     deleteSemesterConfig(id: string): Promise<void>;
     getActiveSemesterConfig(): Promise<SemesterConfig | null>;
     getCallerSnapshot(): Promise<AcademicData | null>;
     getCallerUserProfile(): Promise<UserProfile | null>;
-    getCallerUserRole(): Promise<UserRole>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
-    isCallerAdmin(): Promise<boolean>;
     listSemesterConfigs(): Promise<Array<SemesterConfig>>;
     saveCallerSnapshot(snapshot: AcademicData): Promise<void>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;

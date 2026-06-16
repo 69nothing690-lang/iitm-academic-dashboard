@@ -35,6 +35,8 @@ export function useAppData({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track if we're receiving updates from onSnapshot (to avoid echo-back saves)
   const receivingSnapshot = useRef(false);
+  // Track previous userId to detect account switches
+  const prevUserIdRef = useRef<string | undefined>(undefined);
 
   // ── Initial state ──────────────────────────────────────────────────────────────────
   const [courses, setCourses] = useState<Course[]>(() =>
@@ -69,10 +71,28 @@ export function useAppData({
     getItem<ExamEntry[]>("examEntries", []),
   );
 
-  // ── Cloud load on mount (sync mode only) ──────────────────────────────────────────
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect
+  // ── Cloud load on mount / userId change (sync mode only) ──────────────────────────
   useEffect(() => {
-    if (!isSync) return;
+    // Reset state when userId changes (account switch or sign out)
+    if (userId !== prevUserIdRef.current) {
+      setCourses([]);
+      setTimetableEntries([]);
+      setAttendance([]);
+      setTasks([]);
+      setSemSettings({
+        year: new Date().getFullYear(),
+        semType: autoDetectSem(),
+        overridden: false,
+      });
+      setStudentName("Scholar");
+      setExamEntries([]);
+      prevUserIdRef.current = userId;
+    }
+
+    if (!isSync) {
+      setIsCloudLoading(false);
+      return;
+    }
 
     let unsubscribe: (() => void) | null = null;
 
@@ -82,16 +102,14 @@ export function useAppData({
         if (cloudData) {
           suppressSaveUntil.current = Date.now() + 5000;
           setCourses(cloudData.courses ?? []);
-          setTimetableEntries((cloudData as any).timetableEntries ?? []);
+          setTimetableEntries(cloudData.timetableEntries ?? []);
           setAttendance(cloudData.attendance ?? []);
           setTasks(cloudData.tasks ?? []);
           if (cloudData.semSettings) setSemSettings(cloudData.semSettings);
           if (cloudData.studentName) setStudentName(cloudData.studentName);
           setExamEntries(cloudData.examEntries ?? []);
         } else if (migrateLocal) {
-          const localData: FirestoreData & {
-            timetableEntries: TimetableEntry[];
-          } = {
+          const localData: FirestoreData = {
             courses: getItem<Course[]>("courses", []),
             timetableEntries: getItem<TimetableEntry[]>("timetableEntries", []),
             attendance: getItem<AttendanceRecord[]>("attendance", []),
@@ -131,7 +149,7 @@ export function useAppData({
           receivingSnapshot.current = true;
           suppressSaveUntil.current = Date.now() + 3000;
           setCourses(data.courses ?? []);
-          setTimetableEntries((data as any).timetableEntries ?? []);
+          setTimetableEntries(data.timetableEntries ?? []);
           setAttendance(data.attendance ?? []);
           setTasks(data.tasks ?? []);
           if (data.semSettings) setSemSettings(data.semSettings);
@@ -151,7 +169,7 @@ export function useAppData({
     return () => {
       unsubscribe?.();
     };
-  }, []);
+  }, [userId, isSync, migrateLocal]);
 
   // ── localStorage persistence (always, for offline resilience) ──────────────────────
   useEffect(() => {
@@ -194,7 +212,7 @@ export function useAppData({
         semSettings,
         studentName,
         examEntries,
-      } as any).catch((e) => console.warn("Firestore save failed:", e));
+      }).catch((e) => console.warn("Firestore save failed:", e));
     }, 500);
 
     return () => {

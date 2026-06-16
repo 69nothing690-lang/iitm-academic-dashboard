@@ -37,19 +37,12 @@ export interface SlotExamDate {
   'endSem' : string,
 }
 export interface UserProfile { 'name' : string }
-export type UserRole = { 'admin' : null } |
-  { 'user' : null } |
-  { 'guest' : null };
 export interface _SERVICE {
-  '_initializeAccessControlWithSecret' : ActorMethod<[string], undefined>,
-  'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
   'deleteSemesterConfig' : ActorMethod<[string], undefined>,
   'getActiveSemesterConfig' : ActorMethod<[], [] | [SemesterConfig]>,
   'getCallerSnapshot' : ActorMethod<[], [] | [AcademicData]>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
-  'getCallerUserRole' : ActorMethod<[], UserRole>,
   'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
-  'isCallerAdmin' : ActorMethod<[], boolean>,
   'listSemesterConfigs' : ActorMethod<[], Array<SemesterConfig>>,
   'saveCallerSnapshot' : ActorMethod<[AcademicData], undefined>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,

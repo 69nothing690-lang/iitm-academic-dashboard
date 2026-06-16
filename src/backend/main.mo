@@ -3,12 +3,10 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Array "mo:core/Array";
-import MixinAuthorization "authorization/MixinAuthorization";
-import AccessControl "authorization/access-control";
+
+
 
 actor {
-  let accessControlState = AccessControl.initState();
-  include MixinAuthorization(accessControlState);
 
   public type UserProfile = {
     name : Text;
@@ -41,64 +39,61 @@ actor {
   let userProfiles = Map.empty<Principal, UserProfile>();
   let semesterConfigs = Map.empty<Text, SemesterConfig>();
 
-  // Required user profile functions
-  public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can access profiles");
+  // Admin principal (migrated from old accessControlState, or first caller on fresh install)
+  var adminPrincipal : ?Principal = null;
+
+  private func isAdmin(caller : Principal) : Bool {
+    switch (adminPrincipal) {
+      case (?admin) { caller == admin };
+      case null { true }; // fresh install: first caller becomes admin
     };
+  };
+
+  // User profile functions
+  public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
     userProfiles.get(caller);
   };
 
-  public query ({ caller }) func getUserProfile(user : Principal) : async ?UserProfile {
-    if (caller != user and not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Can only view your own profile");
-    };
+  public query func getUserProfile(user : Principal) : async ?UserProfile {
     userProfiles.get(user);
   };
 
   public shared ({ caller }) func saveCallerUserProfile(profile : UserProfile) : async () {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can save profiles");
-    };
     userProfiles.add(caller, profile);
   };
 
   // Academic data functions
   public query ({ caller }) func getCallerSnapshot() : async ?AcademicData {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can access academic data");
-    };
     records.get(caller);
   };
 
   public shared ({ caller }) func saveCallerSnapshot(snapshot : AcademicData) : async () {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can save academic data");
-    };
     records.add(caller, snapshot);
   };
 
   // Semester configuration functions
   public shared ({ caller }) func saveSemesterConfig(config : SemesterConfig) : async () {
-    if (not (AccessControl.isAdmin(accessControlState, caller))) {
+    if (not isAdmin(caller)) {
       Runtime.trap("Unauthorized: Only admins can save semester configurations");
+    };
+    if (adminPrincipal == null) {
+      adminPrincipal := ?caller;
     };
     semesterConfigs.add(config.id, config);
   };
 
   public shared ({ caller }) func deleteSemesterConfig(id : Text) : async () {
-    if (not (AccessControl.isAdmin(accessControlState, caller))) {
+    if (not isAdmin(caller)) {
       Runtime.trap("Unauthorized: Only admins can delete semester configurations");
     };
     semesterConfigs.remove(id);
   };
 
   public shared ({ caller }) func setActiveSemester(id : Text) : async () {
-    if (not (AccessControl.isAdmin(accessControlState, caller))) {
+    if (not isAdmin(caller)) {
       Runtime.trap("Unauthorized: Only admins can set active semester");
     };
 
-    // First, set all semesters to inactive
     for ((configId, config) in semesterConfigs.entries()) {
       let updatedConfig = {
         id = config.id;
@@ -121,7 +116,6 @@ actor {
       semesterConfigs.add(configId, updatedConfig);
     };
 
-    // Then, set the specified semester to active
     switch (semesterConfigs.get(id)) {
       case (?config) {
         let activeConfig = {
@@ -151,7 +145,6 @@ actor {
   };
 
   public query func getActiveSemesterConfig() : async ?SemesterConfig {
-    // Public function - no authorization required
     for ((_, config) in semesterConfigs.entries()) {
       if (config.isActive) {
         return ?config;
@@ -161,7 +154,7 @@ actor {
   };
 
   public query ({ caller }) func listSemesterConfigs() : async [SemesterConfig] {
-    if (not (AccessControl.isAdmin(accessControlState, caller))) {
+    if (not isAdmin(caller)) {
       Runtime.trap("Unauthorized: Only admins can list all semester configurations");
     };
 
